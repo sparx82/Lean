@@ -34,6 +34,7 @@
     <Message Text="SelectedOptimization $(SelectedOptimization)" Importance="high" />
   </Target>
   <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="System.ComponentModel.Composition" Version="6.0.0" />
   </ItemGroup>
   <ItemGroup>

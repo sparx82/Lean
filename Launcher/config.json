@@ -6,7 +6,7 @@
   // two predefined environments, 'backtesting' and 'live', feel free
   // to add more!
 
-  "environment": "backtesting", // "live-paper", "backtesting", "live-interactive", "live-interactive-iqfeed"
+  "environment": "live-saxo", // "live-paper", "backtesting", "live-interactive", "live-interactive-iqfeed"
 
   // algorithm class selector
   "algorithm-type-name": "BasicTemplateFrameworkAlgorithm",
@@ -75,8 +75,8 @@
   "reserved-words-prefix": "@",
 
   // To get your api access token go to quantconnect.com/account
-  "job-user-id": "0",
-  "api-access-token": "",
+  "job-user-id": "436346",
+  "api-access-token": "8f8b853a9fe5288ccd987d1af623c8e1083ba14873c3c9f6d05238b3c04d7752",
   "job-organization-id": "",
 
   // live data configuration
@@ -99,6 +99,13 @@
   "ib-enable-delayed-streaming-data": false,
   "ib-weekly-restart-utc-time": "22:00:00",
   "ib-financial-advisors-group-filter": "",
+  
+  // Saxo configuration
+  "saxo-username": "20907328",
+  "saxo-password": "lhtf0dhm",
+  "saxo-client-id": "9e83e75f557d49c7aba1edff20c20f80",
+  "saxo-redirect-url": "http://localhost",
+  "saxo-api-url": "https://gateway.saxobank.com/sim/openapi",
 
   // tradier configuration
   "tradier-environment": "paper",
@@ -211,13 +218,14 @@
   "tt-log-fix-messages": false,
 
   // Trade Station configuration
-  "trade-station-client-id": "",
-  "trade-station-client-secret": "",
+  "trade-station-client-id": "abcd",
+  "trade-station-client-secret": "cdef",
   "trade-station-redirect-url": "http://localhost",
   "trade-station-refresh-token": "",
   "trade-station-api-url": "https://sim-api.tradestation.com",
-  "trade-station-account-type": "Cash|Margin|Futures",
+  "trade-station-account-type": "Cash",
   "trade-station-account-id": "",
+  "trade-station-authorization-code": "nocodeprovided",
 
   // Alpaca configuration
   "alpaca-api-key": "",
@@ -343,6 +351,19 @@
       "real-time-handler": "QuantConnect.Lean.Engine.RealTime.LiveTradingRealTimeHandler",
       "transaction-handler": "QuantConnect.Lean.Engine.TransactionHandlers.BacktestingTransactionHandler"
     },
+	
+	"live-saxo": {
+	  "live-mode": true,
+
+	  "live-mode-brokerage": "SaxoBrokerage",
+
+	  "setup-handler": "QuantConnect.Lean.Engine.Setup.BrokerageSetupHandler",
+	  "result-handler": "QuantConnect.Lean.Engine.Results.LiveTradingResultHandler",
+	  "data-feed-handler": "QuantConnect.Lean.Engine.DataFeeds.LiveTradingDataFeed",
+	  "data-queue-handler": [ "QuantConnect.Lean.Engine.DataFeeds.Queues.LiveDataQueue" ],
+	  "real-time-handler": "QuantConnect.Lean.Engine.RealTime.LiveTradingRealTimeHandler",
+	  "transaction-handler": "QuantConnect.Lean.Engine.TransactionHandlers.BacktestingTransactionHandler"
+	},
 
     // defines 'live-zerodha' environment
     "live-zerodha": {
