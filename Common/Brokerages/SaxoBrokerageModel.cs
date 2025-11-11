@@ -36,10 +36,9 @@ namespace QuantConnect.Brokerages
     /// Represents a brokerage model specific to Saxo.
     /// </summary>
     public class SaxoBrokerageModel : DefaultBrokerageModel
-	{
+    {
         public SaxoBrokerageModel(AccountType accountType = AccountType.Cash) : base(accountType)
         {
         }
     }
-
 }

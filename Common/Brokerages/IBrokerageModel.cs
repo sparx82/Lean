@@ -394,6 +394,9 @@ namespace QuantConnect.Brokerages
                 case TastytradeBrokerageModel:
                     return BrokerageName.Tastytrade;
 
+                case SaxoBrokerageModel _:
+                    return BrokerageName.Saxo;
+
                 case DefaultBrokerageModel _:
                     return BrokerageName.Default;
 

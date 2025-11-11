@@ -26,7 +26,7 @@
 
   // debugging configuration - options for debugging-method LocalCmdLine, VisualStudio, Debugpy, PyCharm
   "debugging": false,
-  "debugging-method": "LocalCmdline",
+  "debugging-method": "VisualStudio",
 
   // location of a python virtual env to use libraries from
   //"python-venv": "/venv",
@@ -76,7 +76,7 @@
 
   // To get your api access token go to quantconnect.com/account
   "job-user-id": "436346",
-  "api-access-token": "8f8b853a9fe5288ccd987d1af623c8e1083ba14873c3c9f6d05238b3c04d7752",
+  "api-access-token": "",
   "job-organization-id": "",
 
   // live data configuration
@@ -101,8 +101,6 @@
   "ib-financial-advisors-group-filter": "",
   
   // Saxo configuration
-  "saxo-username": "20907328",
-  "saxo-password": "lhtf0dhm",
   "saxo-client-id": "9e83e75f557d49c7aba1edff20c20f80",
   "saxo-redirect-url": "http://localhost",
   "saxo-api-url": "https://gateway.saxobank.com/sim/openapi",
@@ -357,12 +355,14 @@
 
 	  "live-mode-brokerage": "SaxoBrokerage",
 
-	  "setup-handler": "QuantConnect.Lean.Engine.Setup.BrokerageSetupHandler",
-	  "result-handler": "QuantConnect.Lean.Engine.Results.LiveTradingResultHandler",
-	  "data-feed-handler": "QuantConnect.Lean.Engine.DataFeeds.LiveTradingDataFeed",
-	  "data-queue-handler": [ "QuantConnect.Lean.Engine.DataFeeds.Queues.LiveDataQueue" ],
-	  "real-time-handler": "QuantConnect.Lean.Engine.RealTime.LiveTradingRealTimeHandler",
-	  "transaction-handler": "QuantConnect.Lean.Engine.TransactionHandlers.BacktestingTransactionHandler"
+      "live-mode-brokerage": "SaxoBrokerage",
+      "data-queue-handler": [ "SaxoBrokerage" ],
+      "setup-handler": "QuantConnect.Lean.Engine.Setup.BrokerageSetupHandler",
+      "result-handler": "QuantConnect.Lean.Engine.Results.LiveTradingResultHandler",
+      "data-feed-handler": "QuantConnect.Lean.Engine.DataFeeds.LiveTradingDataFeed",
+      "real-time-handler": "QuantConnect.Lean.Engine.RealTime.LiveTradingRealTimeHandler",
+      "transaction-handler": "QuantConnect.Lean.Engine.TransactionHandlers.BrokerageTransactionHandler",
+      "history-provider": [ "BrokerageHistoryProvider", "SubscriptionDataReaderHistoryProvider" ]
 	},
 
     // defines 'live-zerodha' environment
