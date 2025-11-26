@@ -207,6 +207,10 @@ namespace QuantConnect.Securities.Future
             {Symbol.Create(Futures.Indices.TecDAX, SecurityType.Future, Market.EUREX),
                 GetDAXFuturesExpiry(Market.EUREX, Futures.Indices.TecDAX)
             },
+            // SMI (FSMI): https://www.eurex.com/ex-en/markets/idx/country/six/SMI-Futures-952762
+            {Symbol.Create(Futures.Indices.SMI, SecurityType.Future, Market.EUREX),
+                GetDAXFuturesExpiry(Market.EUREX, Futures.Indices.SMI)
+            },
             // NASDAQ100EMini (NQ): http://www.cmegroup.com/trading/equity-index/us-index/e-mini-nasdaq-100_contract_specifications.html
             {Symbol.Create(Futures.Indices.NASDAQ100EMini, SecurityType.Future, Market.CME), (time =>
                 {

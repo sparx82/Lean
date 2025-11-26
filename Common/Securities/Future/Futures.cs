@@ -1643,6 +1643,11 @@ namespace QuantConnect.Securities
             /// TecDAX Futures
             /// </summary>
             public const string TecDAX = "FTDX";
+
+            /// <summary>
+            /// SMI Futures
+            /// </summary>
+            public const string SMI = "FSMI";
         }
 
         /// <summary>
