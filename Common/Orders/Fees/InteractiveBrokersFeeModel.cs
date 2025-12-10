@@ -406,7 +406,13 @@ namespace QuantConnect.Orders.Fees
             }
 
             // Add exchange fees + IBKR regulatory fee (0.02)
-            return new CashAmount(ibFeePerContract + exchangeFeePerContract + 0.02m, Currencies.EUR);
+            var currency = Currencies.EUR;
+
+            if(symbol == "SMI")
+            {
+                currency = Currencies.CHF;
+            }
+            return new CashAmount(ibFeePerContract + exchangeFeePerContract + 0.02m, currency);
         }
 
         /// <summary>
@@ -464,6 +470,7 @@ namespace QuantConnect.Orders.Fees
         {
             // Futures
             { "FESX", 0.00m },
+            { "SMI", 0.00m },
         };
 
         private static readonly Dictionary<string, decimal> _usaFutureOptionsExchangeFees = new()

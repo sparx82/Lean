@@ -1647,7 +1647,7 @@ namespace QuantConnect.Securities
             /// <summary>
             /// SMI Futures
             /// </summary>
-            public const string SMI = "FSMI";
+            public const string SMI = "SMI";
         }
 
         /// <summary>

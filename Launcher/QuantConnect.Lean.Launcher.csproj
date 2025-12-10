@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
@@ -69,5 +69,16 @@
     <None Include="config.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="QuantConnect.Brokerages.InteractiveBrokers">
+      <HintPath>..\..\Lean.Brokerages.InteractiveBrokers\QuantConnect.InteractiveBrokersBrokerage\bin\Debug\QuantConnect.Brokerages.InteractiveBrokers.dll</HintPath>
+    </Reference>
+    <Reference Include="QuantConnect.Brokerages.Saxo">
+      <HintPath>..\..\Lean.Brokerages.Saxo\QuantConnect.SaxoBrokerage\bin\Debug\QuantConnect.Brokerages.Saxo.dll</HintPath>
+    </Reference>
+    <Reference Include="QuantConnect.Lean.DataSource.DataBento">
+      <HintPath>..\..\Lean.DataSource.DataBento\QuantConnect.DataBento\bin\Debug\QuantConnect.Lean.DataSource.DataBento.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>

@@ -44,10 +44,8 @@ public class BasicTemplateFrameworkAlgorithm : QCAlgorithm, IRegressionAlgorithm
         // Set requested data resolution
         UniverseSettings.Resolution = Resolution.Minute;
 
-        SetAccountCurrency("EUR");
-
-        SetStartDate(2025, 10, 07);  //Set Start Date
-        SetEndDate(2025, 10, 11);    //Set End Date
+        SetStartDate(2013, 10, 07);  //Set Start Date
+        SetEndDate(2013, 10, 11);    //Set End Date
         SetCash(100000);             //Set Strategy Cash
 
         // Find more symbols here: http://quantconnect.com/data
@@ -56,7 +54,7 @@ public class BasicTemplateFrameworkAlgorithm : QCAlgorithm, IRegressionAlgorithm
         // Options Resolution: Minute Only.
 
         // set algorithm framework models
-        SetUniverseSelection(new ManualUniverseSelectionModel(QuantConnect.Symbol.Create("AAPL:xnas", SecurityType.Equity, Market.USA)));
+        SetUniverseSelection(new ManualUniverseSelectionModel(QuantConnect.Symbol.Create("AAPL", SecurityType.Equity, Market.USA)));
         SetAlpha(new ConstantAlphaModel(InsightType.Price, InsightDirection.Up, TimeSpan.FromMinutes(20), 0.025, null));
 
         // We can define who often the EWPCM will rebalance if no new insight is submitted using:
