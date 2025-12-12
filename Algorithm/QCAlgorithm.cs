@@ -840,11 +840,6 @@ namespace QuantConnect.Algorithm
                 SetFinishedWarmingUp();
             }
 
-            if (Settings.DailyPreciseEndTime)
-            {
-                Debug("Accurate daily end-times now enabled by default. See more at https://qnt.co/3YHaWHL. To disable it and use legacy daily bars set self.settings.daily_precise_end_time = False.");
-            }
-
             // perform end of time step checks, such as enforcing underlying securities are in raw data mode
             OnEndOfTimeStep();
         }
@@ -2791,7 +2786,7 @@ namespace QuantConnect.Algorithm
         public void Debug(string message)
         {
             if (!_liveMode && (string.IsNullOrEmpty(message) || _previousDebugMessage == message)) return;
-            _debugMessages.Enqueue(message);
+            _debugMessages.Enqueue(FormatLog(message));
             _previousDebugMessage = message;
         }
 
@@ -2841,7 +2836,7 @@ namespace QuantConnect.Algorithm
         public void Log(string message)
         {
             if (!_liveMode && string.IsNullOrEmpty(message)) return;
-            _logMessages.Enqueue(message);
+            _logMessages.Enqueue(FormatLog(message));
         }
 
         /// <summary>
@@ -2890,7 +2885,7 @@ namespace QuantConnect.Algorithm
         public void Error(string message)
         {
             if (!_liveMode && (string.IsNullOrEmpty(message) || _previousErrorMessage == message)) return;
-            _errorMessages.Enqueue(message);
+            _errorMessages.Enqueue(FormatLog(message));
             _previousErrorMessage = message;
         }
 
@@ -2939,10 +2934,7 @@ namespace QuantConnect.Algorithm
         [DocumentationAttribute(Logging)]
         public void Error(Exception error)
         {
-            var message = error.Message;
-            if (!_liveMode && (string.IsNullOrEmpty(message) || _previousErrorMessage == message)) return;
-            _errorMessages.Enqueue(message);
-            _previousErrorMessage = message;
+            Error(error.Message);
         }
 
         /// <summary>
@@ -3819,6 +3811,11 @@ namespace QuantConnect.Algorithm
         {
             var exchange = MarketHoursDatabase.GetExchangeHours(symbol.ID.Market, symbol, symbol.SecurityType);
             return UtcTime.ConvertFromUtc(exchange.TimeZone);
+        }
+
+        private string FormatLog(string message)
+        {
+            return $"{Time.ToStringInvariant(DateFormat.UI)} {message}";
         }
     }
 }
