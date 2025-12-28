@@ -48,28 +48,44 @@ namespace QuantConnect.Algorithm.CSharp
     /// <meta name="tag" content="strategy example" />
     public class FuturesMomentumAlgorithmSaxo : QCAlgorithm
     {
-        private Symbol _futureSymbol;
-        // Define your rolling window size (e.g., last 5 minutes of data)
-        private int LookbackMinutes = 3;
-        private RollingWindow<TradeBar> _priceWindow;
+        // Parameter für die Strategie (Eurex SMI)
+        private const string RootSymbol = Futures.Indices.SMI;
+        private Symbol _activeContract = null;
 
-        private readonly decimal MomentumThreshold = 10.0m;
-
-        private Symbol _activeSymbol;
         private Future future;
+        private Symbol _activeSymbol;
 
-        private Symbol _activeContractSymbol = null;
-        private FuturesContract _tradingContract;
+        // Indikatoren
+        private ExponentialMovingAverage _emaTrend;
+        private IDataConsolidator _trendConsolidator;
 
-        private decimal _entryPrice;
-        private bool _invested;
-        private OrderTicket _stopLossTicket;
+        // OPTIMIERUNG: Konsolidierungs-Zeitraum
+        // 1 Minute ist ideal für Intraday-Trendfilter (200 EMA = 200 Minuten Rückblick).
+        // 5 Minuten wäre für einen 200 EMA zu träge (1000 Minuten Rückblick -> Mehrtages-Trend).
+        private readonly TimeSpan _barPeriod = TimeSpan.FromMinutes(1);
 
-        private int _activiationPriceDelta = 5;
-        private int _entryDelta = 10;
-        private int _trailingStopDelta = 2;
+        private int _emaWindow = 100;
 
-        private TickConsolidator _minuteConsolidator;
+        // Strategie-Variablen
+        private decimal _dailyHigh = 0;
+        private decimal _dailyLow = 0;
+        private bool _rangeDefined = false;
+        private bool _investedToday = false;
+
+        // DAX Stop Loss in Punkten (z.B. 20 Punkte) ist oft besser als %
+        // Hier als Beispiel in % (0.2% im DAX sind ca. 30-40 Punkte bei 16000)
+        private decimal _stopLossPoints = 30m;
+        private decimal _takeProfitPoints = 90m; // CRV 3:1
+
+        // P&L Tracking
+        private decimal _lastPortfolioProfit = 0;
+        private decimal _lastTotalFees = 0;
+
+        // Zeit-Einstellungen (Berlin Zeit für Eurex)
+        // DAX-Future handelt früher, aber Liquidität und ORB-Logik orientieren sich oft am Xetra-Start (09:00)
+        private readonly TimeSpan _marketOpen = new TimeSpan(9, 0, 0);
+        private readonly TimeSpan _rangeEnd = new TimeSpan(9, 30, 0); // 30 Minuten Opening Range
+        private readonly TimeSpan _exitTime = new TimeSpan(17, 30, 0); // Xetra Schlussauktion / Liquidierung
 
         public override void Initialize()
         {
@@ -78,9 +94,10 @@ namespace QuantConnect.Algorithm.CSharp
 
             SetBrokerageModel(Brokerages.BrokerageName.InteractiveBrokersBrokerage, AccountType.Cash);
 
-            _trailingStopDelta = Convert.ToInt32(GetParameter("trailingStopDelta", 2));
-            _activiationPriceDelta = Convert.ToInt32(GetParameter("activationPriceDelta", 5));
-            _entryDelta = Convert.ToInt32(GetParameter("entryDelta", 10));
+            _emaWindow = Convert.ToInt32(GetParameter("emaWindow", 40));
+            _stopLossPoints = Convert.ToDecimal(GetParameter("stopLossPoints", 20m));
+            _takeProfitPoints = Convert.ToDecimal(GetParameter("takeProfitPoints", 100m));
+            //_stoplossInital = Convert.ToInt32(GetParameter("stoplossInital", 50));
 
             if (Config.Get("environment") == "live-interactive")
             {
@@ -89,221 +106,244 @@ namespace QuantConnect.Algorithm.CSharp
 
                 Log($"[Init] Calculated Target Expiry: {targetExpiry.ToShortDateString()}");
 
-                _activeContractSymbol = QuantConnect.Symbol.CreateFuture(ticker, Market.EUREX, targetExpiry);
-                AddFutureContract(_activeContractSymbol, Resolution.Tick);
+                _activeSymbol = QuantConnect.Symbol.CreateFuture(ticker, Market.EUREX, targetExpiry);
+                AddFutureContract(_activeSymbol, Resolution.Tick);
             }
             else
             {
-                SetStartDate(2024, 01, 1);
-                SetEndDate(2024, 1, 10);
+                SetStartDate(2020, 1, 1);
+                SetEndDate(2025, 10, 31);
 
-                future = AddFuture(Futures.Indices.SMI, Resolution.Tick, dataMappingMode: DataMappingMode.LastTradingDay, dataNormalizationMode: DataNormalizationMode.BackwardsRatio);
-                future.SetFilter(TimeSpan.Zero, TimeSpan.FromDays(90));
+                future = AddFuture(Futures.Indices.SMI, Resolution.Tick, dataMappingMode: DataMappingMode.OpenInterest, dataNormalizationMode: DataNormalizationMode.BackwardsRatio);
+                future.SetFilter(TimeSpan.Zero, TimeSpan.FromDays(182));
 
                 // Set a security initializer to apply a Fee Model to everything
                 SetSecurityInitializer(security =>
                 {
                     if (security.Type == SecurityType.Future)
                     {
-                        //security.SetFeeModel(new InteractiveBrokersFeeModel());
-                        security.SetFeeModel(new SaxoFeeModel());
+                        security.SetFeeModel(new InteractiveBrokersFeeModel());
+                        //security.SetFeeModel(new SaxoFeeModel());
                     }
                 });
-
-                _activeContractSymbol = future.Symbol;
             }
 
-            _minuteConsolidator = new TickConsolidator(TimeSpan.FromMinutes(1));
-            _minuteConsolidator.DataConsolidated += OnMinuteBar;
-            SubscriptionManager.AddConsolidator(_activeContractSymbol, _minuteConsolidator);
+            _emaTrend = new ExponentialMovingAverage(_emaWindow);
 
-            _priceWindow = new RollingWindow<TradeBar>(LookbackMinutes);
-
-            SetWarmUp(TimeSpan.FromMinutes(LookbackMinutes));
-
-            Schedule.On(DateRules.EveryDay(), TimeRules.BeforeMarketOpen(symbol: _activeContractSymbol, minutesBeforeOpen: 10), () =>
+            // TÄGLICHER ROLLOVER-CHECK: Vor Marktöffnung (08:45) prüfen wir, welcher Kontrakt das meiste OI hat
+            Schedule.On(DateRules.EveryDay(RootSymbol), TimeRules.At(8, 45, TimeZones.Berlin), () =>
             {
+                UpdateActiveContract();
+            });
+
+            // 4. Scheduled Events
+            // Liquidierung am Ende des Handelstages (Berlin Zeit)
+            Schedule.On(DateRules.EveryDay(RootSymbol), TimeRules.At(_exitTime.Hours, _exitTime.Minutes, TimeZones.Berlin), () =>
+            {
+                Liquidate();
+                _investedToday = false;
+                _rangeDefined = false;
+                _dailyHigh = 0; // Reset High/Low
+                _dailyLow = 0;
             });
         }
 
         /// <summary>
-        /// This event fires once every minute, when the consolidator finishes a bar.
+        /// Wird aufgerufen, wenn neue Tick-Daten eintreffen
         /// </summary>
-        private void OnMinuteBar(object sender, TradeBar bar)
+        public override void OnData(Slice data)
         {
-            // 2. Add the new 1-minute bar to the RollingWindow
-            _priceWindow.Add(bar);
+            if (_activeContract == null) return;
 
-            // Log the bar details to verify
-            //Log($"[1-Min Bar] Time: {bar.Time.ToShortTimeString()} | Close: {bar.Close} | Vol: {bar.Volume}");
+            // Prüfen, ob Ticks für unseren Kontrakt vorhanden sind
+            if (!data.Ticks.ContainsKey(_activeContract)) return;
 
-            // Example Logic: Buy if the window is full and price is rising
-            if (!_priceWindow.IsReady) return;
+            var ticks = data.Ticks[_activeContract];
 
-            decimal priceChange = _priceWindow[0].Close - _priceWindow[1].Close;
-
-            if (!Portfolio.Invested && !_invested && priceChange > _entryDelta)
+            // Wir iterieren durch alle Ticks in diesem Slice (können mehrere sein)
+            foreach (var tick in ticks)
             {
-                Log("Buy Signal: Close > Previous High");
-                var entryTicket = MarketOrder(_activeSymbol, 1);
-                if (entryTicket.Status == OrderStatus.Filled)
+                // Wir nutzen nur Trades für die Preisfindung der Strategie (Quotes ignorieren wir hier für den Trigger)
+                if (tick.TickType != TickType.Trade) continue;
+
+                decimal currentPrice = tick.Price;
+
+                // Aktuelle Zeit in Berlin
+                //var exchangeTime = tick.Time.ToUniversalTime().ConvertFromUtc(TimeZones.Berlin).TimeOfDay;
+                var exchangeTime = tick.Time.TimeOfDay;
+
+                // --- Phase 1: Außerhalb der Kern-Handelszeiten ---
+                if (exchangeTime < _marketOpen || exchangeTime >= _exitTime)
                 {
-                    _entryPrice = entryTicket.AverageFillPrice;
-                    _invested = true;
-
-                    // "Place a stop loss order at -10 points from the current value"
-                    decimal initialStopPrice = _entryPrice - 10;
-                    _stopLossTicket = StopMarketOrder(_activeSymbol, -1, initialStopPrice);
-
-                    Debug($"Entered Long at {_entryPrice}. Initial Stop at {initialStopPrice}");
+                    continue;
                 }
-            }
 
-            // -----------------------------------------------------------
-            // EXIT / TRAILING STOP LOGIC
-            // -----------------------------------------------------------
-            if (Portfolio.Invested && _stopLossTicket != null && _stopLossTicket.Status == OrderStatus.Submitted)
-            {
-                decimal currentPrice = bar.Close;
-
-                // Requirement: "Trailing stop distance of 2" AND "5 points higher as minimum value"
-
-                // Calculate where the trailing stop 'wants' to be (Current Price - 2)
-                decimal proposedStopPrice = currentPrice - _trailingStopDelta;
-
-                // Calculate the "Minimum Value" requirement (Entry + 5)
-                // The stop cannot be placed/moved until the logic yields a price > Entry + 5
-                decimal activationPrice = _entryPrice + _activiationPriceDelta;
-
-                // Check if our proposed trailing stop meets the minimum profit requirement
-                if (proposedStopPrice >= activationPrice)
+                // --- Phase 2: Opening Range definieren (09:00 bis 09:30 Uhr) ---
+                if (exchangeTime >= _marketOpen && exchangeTime < _rangeEnd)
                 {
-                    // We only update if the new stop price is HIGHER than the old one 
-                    // (Standard trailing stop behavior: never move a stop down)
-                    if (proposedStopPrice > _stopLossTicket.Get(OrderField.StopPrice))
+                    if (!_rangeDefined)
                     {
-                        // Update the existing Stop Market Order
-                        var updateSettings = new UpdateOrderFields
-                        {
-                            StopPrice = proposedStopPrice,
-                            Tag = $"Trailing Triggered! Locked in > 5 pts. New Stop: {proposedStopPrice}"
-                        };
-
-                        _stopLossTicket.Update(updateSettings);
-                        Debug($"Stop Updated to {proposedStopPrice}");
+                        _dailyHigh = currentPrice;
+                        _dailyLow = currentPrice;
+                        _rangeDefined = true;
                     }
+                    else
+                    {
+                        if (currentPrice > _dailyHigh) _dailyHigh = currentPrice;
+                        if (currentPrice < _dailyLow) _dailyLow = currentPrice;
+                    }
+                    continue; // Noch kein Trading
+                }
 
+                // --- Phase 3: Trading ---
+                // Wichtig: Indikator muss bereit sein (IsReady)
+                if (!_emaTrend.IsReady) continue;
+
+                if (!Portfolio.Invested && !_investedToday)
+                {
+                    // Long Signal
+                    if (currentPrice > _dailyHigh && currentPrice > _emaTrend)
+                    {
+                        SetHoldings(_activeContract, 0.5);
+                        _investedToday = true;
+                        Debug($"Long Entry (Tick): {currentPrice} > {_dailyHigh}, Date: {tick.EndTime:dd.MM.yyyy HH:mm:ss}");
+                    }
+                    // Short Signal
+                    else if (currentPrice < _dailyLow && currentPrice < _emaTrend)
+                    {
+                        SetHoldings(_activeContract, -0.5);
+                        _investedToday = true;
+                        Debug($"Short Entry (Tick): {currentPrice} < {_dailyLow}, Date: {tick.EndTime:dd.MM.yyyy HH:mm:ss}");
+                    }
+                }
+
+                // --- Phase 4: Risikomanagement (Tick-Genauigkeit) ---
+                if (Portfolio.Invested)
+                {
+                    var holdings = Portfolio[_activeContract];
+                    var entryPrice = holdings.AveragePrice;
+
+                    if (holdings.IsLong)
+                    {
+                        if (currentPrice <= entryPrice - _stopLossPoints)
+                        {
+                            Liquidate(_activeContract, "Stop Loss Long");
+                        }
+                        else if (currentPrice >= entryPrice + _takeProfitPoints)
+                        {
+                            Liquidate(_activeContract, "Take Profit Long");
+                        }
+                    }
+                    else if (holdings.IsShort)
+                    {
+                        if (currentPrice >= entryPrice + _stopLossPoints)
+                        {
+                            Liquidate(_activeContract, "Stop Loss Short");
+                        }
+                        else if (currentPrice <= entryPrice - _takeProfitPoints)
+                        {
+                            Liquidate(_activeContract, "Take Profit Short");
+                        }
+                    }
                 }
             }
         }
 
+        public override void OnSecuritiesChanged(SecurityChanges changes)
+        {
+            // Wenn neue Futures hinzukommen (z.B. am Start oder durch Filter-Änderung),
+            // prüfen wir sofort, ob wir den Kontrakt wechseln sollten.
+            if (changes.AddedSecurities.Any(s => s.Symbol.SecurityType == SecurityType.Future))
+            {
+                UpdateActiveContract();
+            }
+        }
+
+        /// <summary>
+        /// Überprüft alle verfügbaren Futures und wählt den mit dem höchsten Open Interest
+        /// </summary>
+        private void UpdateActiveContract()
+        {
+            // Wir suchen alle Futures im aktuellen Universum, die zu unserem RootSymbol gehören
+            // UND deren Verfallsdatum strikt in der Zukunft liegt (> Time.Date)
+            var candidates = ActiveSecurities.Values
+                .Where(s => s.Symbol.SecurityType == SecurityType.Future &&
+                            s.Symbol.ID.Symbol == RootSymbol &&
+                            s.Symbol.ID.Date > Time.Date) // UPDATE: Filter für abgelaufene Kontrakte
+                .ToList();
+
+            if (!candidates.Any()) return;
+
+            // Logik: Wähle den Kontrakt mit dem höchsten Open Interest.
+            // Falls OI gleich ist (z.B. am Anfang), nimm den mit der kürzesten Laufzeit (Date).
+            var bestContract = candidates
+                .OrderByDescending(s => s.OpenInterest)
+                .ThenBy(s => s.Symbol.ID.Date)
+                .FirstOrDefault();
+
+            if (bestContract != null && bestContract.Symbol != _activeContract)
+            {
+                SwitchToContract(bestContract.Symbol);
+            }
+        }
+
+        /// <summary>
+        /// Führt den technischen Wechsel des Kontrakts durch (Consolidators umhängen, History laden)
+        /// </summary>
+        private void SwitchToContract(Symbol newSymbol)
+        {
+            // Alten Consolidator entfernen
+            if (_activeContract != null && _trendConsolidator != null)
+            {
+                SubscriptionManager.RemoveConsolidator(_activeContract, _trendConsolidator);
+                _trendConsolidator = null;
+                // Optional: Alte Positionen schließen, falls man über den Rollover hält (hier nicht nötig da Daytrading)
+                if (Portfolio[_activeContract].Invested) Liquidate(_activeContract);
+            }
+
+            _activeContract = newSymbol;
+            Debug($"Kontraktwechsel zu: {_activeContract.Value} | OI: {ActiveSecurities[_activeContract].OpenInterest}");
+
+            // Neuen Consolidator erstellen
+            _trendConsolidator = new TickConsolidator(_barPeriod);
+            RegisterIndicator(_activeContract, _emaTrend, _trendConsolidator);
+            SubscriptionManager.AddConsolidator(_activeContract, _trendConsolidator);
+
+            // Indikator "aufwärmen" (Warmup)
+            _emaTrend.Reset();
+            var history = History(_activeContract.Canonical, _emaWindow * (int)_barPeriod.TotalMinutes, Resolution.Minute);
+            foreach (var bar in history)
+            {
+                _emaTrend.Update(bar.Time, bar.Close);
+            }
+        }
+
+        // --- NEU: Trade Logging ---
+        // Diese Methode wird automatisch vom Framework aufgerufen, wenn sich der Status einer Order ändert.
         public override void OnOrderEvent(OrderEvent orderEvent)
         {
-            // Reset state if we are stopped out or sell
+            // Wir loggen nur tatsächlich ausgeführte Trades (Filled)
             if (orderEvent.Status == OrderStatus.Filled)
             {
-                if (orderEvent.Direction == OrderDirection.Sell)
-                {
-                    _invested = false;
-                    _stopLossTicket = null;
-                    Debug($"Position Closed. at price {orderEvent.FillPrice}");
-                }
+                // Buy oder Sell Text
+                var direction = orderEvent.Direction == OrderDirection.Buy ? "BUY" : "SELL";
+
+                // P&L Berechnung inklusive Gebühren
+                // Hinweis: Trade Net P&L auf Entry-Seite ist oft negativ (nur Gebühr), 
+                // auf Exit-Seite ist es Realisierter Gewinn - Exit-Gebühr.
+
+                var profitDelta = Portfolio.TotalProfit - _lastPortfolioProfit;
+                var feesDelta = Portfolio.TotalFees - _lastTotalFees;
+                var tradeNetPnL = profitDelta - feesDelta;
+
+                var cumNetPnL = Portfolio.TotalProfit - Portfolio.TotalFees;
+
+                // Update trackers
+                _lastPortfolioProfit = Portfolio.TotalProfit;
+                _lastTotalFees = Portfolio.TotalFees;
+
+                Debug($"[TRADE EXECUTION] {Time:dd.MM.yyyy HH:mm:ss} | {orderEvent.Symbol} | {direction} | Qty: {orderEvent.FillQuantity} | Price: {orderEvent.FillPrice} | Fees: {orderEvent.OrderFee} | Trade Net P&L: {tradeNetPnL:F2} | Cum Net P&L: {cumNetPnL:F2}");
             }
-        }
-
-        public override void OnData(Slice slice)
-        {
-            if (IsWarmingUp) return;
-
-            /*
-            // 3. Check if our specific symbol has tick data in this slice
-            if (data.Ticks.ContainsKey(_activeContractSymbol))
-            {
-                // data.Ticks[_symbol] returns a list of ticks (there can be multiple per split second)
-                var ticks = data.Ticks[_activeContractSymbol];
-
-                foreach (var tick in ticks)
-                {
-                    // 4. Print the data
-                    // We distinguish between 'Trade' (actual execution) and 'Quote' (bid/ask update)
-                    if (tick.TickType == TickType.Trade)
-                    {
-                        //Log($"TRADE >> Time: {tick.Time:HH:mm:ss.fff} | Price: {tick.Price} | Size: {tick.Quantity}");
-                    }
-                    else if (tick.TickType == TickType.Quote)
-                    {
-                        // Quote ticks contain Bid/Ask info
-                        //Log($"QUOTE >> Time: {tick.Time:HH:mm:ss.fff} | Bid: {tick.BidPrice} x {tick.BidSize} | Ask: {tick.AskPrice} x {tick.AskSize}");
-                    }
-                }
-            }*/
-
-            // Now check IsReady
-            /*if (_fast.IsReady)
-            {
-                Plot("My Chart", _fast, _slow);
-            }*/
-
-            /*
-
-            if (IsWarmingUp) return;*/
-
-            FuturesContract contract = null;
-
-            foreach (var chain in slice.FutureChains)
-            {
-                // find the front contract expiring no earlier than in 90 days
-                contract = (
-                    from futuresContract in chain.Value.OrderBy(x => x.Expiry)
-                    where futuresContract.Expiry < Time.Date.AddDays(90)
-                    select futuresContract
-                    ).FirstOrDefault();
-            }
-            
-            // if not found, trade it
-            if (contract == null)
-            {
-                return;
-            }
-
-            _activeSymbol = contract.Symbol;
-
-            /*
-            // Get the current price bar (e.g., the minute bar) for the active contract
-            if (slice.Bars.TryGetValue(_futureSymbol, out var bar))
-            {
-                _priceWindow.Add(bar.Close);
-            }
-
-            if (!_priceWindow.IsReady) return;
-
-            var currentPrice = _priceWindow[0];
-            var oldPrice = _priceWindow[LookbackMinutes - 1];
-            var priceChange = currentPrice - oldPrice;
-
-            // 2. Check for an existing position (to avoid re-entering)
-            var holding = Portfolio[_futureSymbol];
-
-            // Momentum BUY Signal: Strong upward movement and no current long position
-            if (priceChange > MomentumThreshold && !holding.IsLong)
-            {
-                // Close any existing short position first
-                if (holding.IsShort) Liquidate(_futureSymbol);
-
-                // Enter a new long position (e.g., 1 contract)
-                // Use the MarketOrder function
-                MarketOrder(_futureSymbol, 1);
-            }
-
-            // Momentum SELL Signal: Strong downward movement and no current short position
-            else if (priceChange < -MomentumThreshold && !holding.IsShort)
-            {
-                // Close any existing long position first
-                if (holding.IsLong) Liquidate(_futureSymbol);
-
-                // Enter a new short position (e.g., -1 contract)
-                MarketOrder(_futureSymbol, -1);
-            }*/
         }
 
         // --- Helper Logic to find DAX/TecDAX Expiry ---
