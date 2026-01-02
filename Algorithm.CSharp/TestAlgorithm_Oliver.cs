@@ -14,9 +14,8 @@
  *
 */
 
-using Accord.Math;
-using QuantConnect;
-using QuantConnect.Algorithm;
+using Accord.Math.Environments;
+//using QLNet;
 using QuantConnect.Configuration;
 using QuantConnect.Data;
 using QuantConnect.Data.Consolidators;
@@ -26,468 +25,197 @@ using QuantConnect.Indicators;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
-using QuantConnect.Scheduling;
 using QuantConnect.Securities;
 using QuantConnect.Securities.Future;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
 using System.Linq;
+using static QLNet.NumericHaganPricer;
 
 namespace QuantConnect.Algorithm.CSharp
 {
+    /// <summary>
+    /// EMA cross with SP500 E-mini futures
+    /// In this example, we demostrate how to trade futures contracts using
+    /// a equity to generate the trading signals
+    /// It also shows how you can prefilter contracts easily based on expirations.
+    /// It also shows how you can inspect the futures chain to pick a specific contract to trade.
+    /// </summary>
+    /// <meta name="tag" content="using data" />
+    /// <meta name="tag" content="futures" />
+    /// <meta name="tag" content="indicators" />
+    /// <meta name="tag" content="strategy example" />
     public class TestAlgorithm_Oliver : QCAlgorithm
     {
-        private List<IStrategy> _strategies;
-        private IStrategy _activeStrategy;
-
-        // Parameters for strategy selection and trading
-        private TimeSpan SelectionInterval = TimeSpan.FromDays(20); // Re-evaluate strategy every 20 trading days
-        private DateTime _nextSelectionTime;
-
-        // We retain the current Sharpe to implement switching thresholds
-        private double _currentStrategySharpe = -10.0;
-
         private Future future;
-        private Symbol _activeSymbol;
+        private Symbol _continuousSymbol;
+
+        // Indicators
+        private ExponentialMovingAverage _fastEma;
+        private ExponentialMovingAverage _slowEma;
+        private RelativeStrengthIndex _rsi;
+
+        // Risk Management
+        private decimal _trailingStopPercent = 0.03m;
+        private decimal _highWaterMark = 0m;
+        private decimal _lowWaterMark = 0m;
 
         public override void Initialize()
         {
             SetTimeZone("Europe/Zurich");
             SetAccountCurrency("CHF");
+
             SetBrokerageModel(Brokerages.BrokerageName.InteractiveBrokersBrokerage, AccountType.Cash);
 
-            SetStartDate(2024, 1, 1);
-            SetEndDate(2024, 12, 31);
-            SetCash(100000);
+            //_emaWindow = Convert.ToInt32(GetParameter("emaWindow", 40));
+            //_stopLossPoints = Convert.ToDecimal(GetParameter("stopLossPoints", 20m));
+            //_takeProfitPoints = Convert.ToDecimal(GetParameter("takeProfitPoints", 100m));
+            //_stoplossInital = Convert.ToInt32(GetParameter("stoplossInital", 50));
 
-            // CHANGED: Use Tick resolution for source data
-            future = AddFuture(Futures.Indices.SMI, Resolution.Tick, dataMappingMode: DataMappingMode.LastTradingDay, dataNormalizationMode: DataNormalizationMode.BackwardsRatio);
-            future.SetFilter(TimeSpan.Zero, TimeSpan.FromDays(90));
-
-            SetSecurityInitializer(security =>
+            if (Config.Get("environment") == "live-interactive")
             {
-                if (security.Type == SecurityType.Future)
-                {
-                    security.SetFeeModel(new InteractiveBrokersFeeModel());
-                }
-            });
+                var ticker = "SMI";
+                //var targetExpiry = GetNextQuarterlyExpiry(Time);
 
-            _activeSymbol = future.Mapped;
+                //Log($"[Init] Calculated Target Expiry: {targetExpiry.ToShortDateString()}");
 
-            // Warm-up period to gather statistics for Sharpe calculation
-            SetWarmUp(TimeSpan.FromDays(60));
-            _nextSelectionTime = this.Time.Date.Add(SelectionInterval);
-
-            // Initialize Strategies
-            _strategies = new List<IStrategy>
-            {
-                new MovingAverageCrossover(this, future),
-                new MeanReversion(this, future),
-                new OpeningRangeBreakout(this, future)
-            };
-
-            // 1. Rebalancing Schedule
-            Schedule.On(DateRules.EveryDay(future.Symbol), TimeRules.AfterMarketOpen(future.Symbol, 0), () =>
-            {
-                if (IsWarmingUp) return;
-
-                // FIX: Ensure active strategy is initialized before checking rebalance
-                if (_activeStrategy == null) return;
-
-                if (this.Time.Date >= _nextSelectionTime.Date)
-                {
-                    RebalanceStrategy();
-                    _nextSelectionTime = this.Time.Date.Add(SelectionInterval);
-                }
-            });
-
-            // 2. End-Of-Day Statistics Schedule
-            // We must trigger this for ALL strategies to calculate daily returns for Sharpe Ratios
-            Schedule.On(DateRules.EveryDay(future.Symbol), TimeRules.BeforeMarketClose(future.Symbol, 1), () =>
-            {
-                foreach (var strategy in _strategies)
-                {
-                    strategy.OnEndOfDay();
-                }
-
-                // Enforce Day Trading Rule: Flatten active position
-                if (_activeSymbol != null)
-                {
-                    Liquidate(_activeSymbol);
-                    Debug("EOD: Positions Liquidated.");
-                }
-            });
-
-            Debug("Algorithm Initialized. Warming up strategies with Sharpe Ratio tracking...");
-        }
-
-        // CHANGED: Add consolidators for new Future contracts automatically
-        public override void OnSecuritiesChanged(SecurityChanges changes)
-        {
-            foreach (var security in changes.AddedSecurities)
-            {
-                if (security.Type == SecurityType.Future)
-                {
-                    // Create a Tick Consolidator to generate 1-minute bars from ticks
-                    var consolidator = new TickConsolidator(TimeSpan.FromMinutes(1));
-                    consolidator.DataConsolidated += OnDataConsolidated;
-                    SubscriptionManager.AddConsolidator(security.Symbol, consolidator);
-                }
-            }
-
-            foreach (var security in changes.RemovedSecurities)
-            {
-                if (security.Type == SecurityType.Future)
-                {
-                    // Clean up consolidators to prevent memory leaks or duplicate events
-                    SubscriptionManager.RemoveConsolidator(security.Symbol, (IDataConsolidator)null); // Removes all
-                }
-            }
-        }
-
-        // CHANGED: New handler for consolidated minute bars
-        private void OnDataConsolidated(object sender, TradeBar bar)
-        {
-            // 1. Warm-up Phase
-            if (IsWarmingUp)
-            {
-                foreach (var strategy in _strategies)
-                {
-                    strategy.Update(bar);
-                }
-                return;
-            }
-
-            // 2. Initial Selection
-            if (_activeStrategy == null)
-            {
-                SelectBestStrategy();
-                return;
-            }
-
-            // 3. Trading Phase
-            // Update all strategies with the completed bar
-            foreach (var strategy in _strategies)
-            {
-                strategy.Update(bar);
-            }
-
-            // 4. Execution
-            // Ensure we execute on the active symbol corresponding to the data
-            if (_activeSymbol != null)
-            {
-                _activeStrategy.ExecuteRealOrders(_activeSymbol);
-            }
-        }
-
-        public override void OnData(Slice slice)
-        {
-            // CHANGED: Removed strategy updates from OnData. 
-            // OnData now only handles Rollover Logic because it receives Ticks.
-
-            // ROLLOVER LOGIC
-            if (slice.SymbolChangedEvents.ContainsKey(future.Symbol))
-            {
-                _activeSymbol = slice.SymbolChangedEvents[future.Symbol].NewSymbol;
-                Debug($"Rollover: Active Symbol changed to {_activeSymbol}");
-            }
-            else if (_activeSymbol == null || _activeSymbol == future.Symbol)
-            {
-                _activeSymbol = future.Mapped;
-            }
-        }
-
-        private void SelectBestStrategy()
-        {
-            // Real-World: Select based on Risk-Adjusted Return (Sharpe), then Total Profit
-            _activeStrategy = _strategies
-                .OrderByDescending(s => s.GetSharpeRatio())
-                .ThenByDescending(s => s.GetVirtualProfit())
-                .FirstOrDefault();
-
-            if (_activeStrategy != null)
-            {
-                _currentStrategySharpe = _activeStrategy.GetSharpeRatio();
-                Debug($"Selected: {_activeStrategy.Name}. Sharpe: {_currentStrategySharpe:N2} | Virtual Profit: {_activeStrategy.GetVirtualProfit():N2}");
-
-                // Reset the rebalance timer so we don't immediately rebalance after initial selection
-                _nextSelectionTime = this.Time.Date.Add(SelectionInterval);
+                //_continuousSymbol = QuantConnect.Symbol.CreateFuture(ticker, Market.EUREX, targetExpiry);
+                AddFutureContract(_continuousSymbol, Resolution.Tick);
             }
             else
             {
-                Error("No trading strategy could be selected.");
-                _activeStrategy = _strategies.First();
+                SetStartDate(2020, 1, 1);
+                SetEndDate(2025, 10, 31);
+
+                future = AddFuture(Futures.Indices.SMI, Resolution.Minute, dataMappingMode: DataMappingMode.OpenInterest, dataNormalizationMode: DataNormalizationMode.BackwardsRatio);
+                future.SetFilter(TimeSpan.Zero, TimeSpan.FromDays(182));
+
+                // Set a security initializer to apply a Fee Model to everything
+                SetSecurityInitializer(security =>
+                {
+                    if (security.Type == SecurityType.Future)
+                    {
+                        security.SetFeeModel(new InteractiveBrokersFeeModel());
+                        //security.SetFeeModel(new SaxoFeeModel());
+                    }
+                });
             }
+
+            _continuousSymbol = future.Symbol;
+
+            // 3. Manual Indicator Setup (Consolidated Daily Bars)
+            _fastEma = new ExponentialMovingAverage(50);
+            _slowEma = new ExponentialMovingAverage(200);
+            _rsi = new RelativeStrengthIndex(14, MovingAverageType.Wilders);
+
+            // Aggregate Ticks into Daily Bars for stable indicators
+            var dailyConsolidator = new MinuteConsolidator(TimeSpan.FromDays(1));
+
+            dailyConsolidator.DataConsolidated += (sender, bar) =>
+            {
+                _fastEma.Update(bar.Time, bar.Price);
+                _slowEma.Update(bar.Time, bar.Price);
+                _rsi.Update(bar.Time, bar.Price);
+            };
+
+            SubscriptionManager.AddConsolidator(_continuousSymbol, dailyConsolidator);
+            SetWarmUp(TimeSpan.FromDays(200));
+
+
         }
 
-        private void RebalanceStrategy()
+        /// <summary>
+        /// Wird aufgerufen, wenn neue Tick-Daten eintreffen
+        /// </summary>
+        public override void OnData(Slice data)
         {
-            // Find the best alternative
-            var bestAlternative = _strategies
-                .Where(s => s != _activeStrategy)
-                .OrderByDescending(s => s.GetSharpeRatio())
-                .FirstOrDefault();
+            // A. VALIDATION CHECKS
+            if (!_fastEma.IsReady || !_slowEma.IsReady || !_rsi.IsReady) return;
 
-            if (bestAlternative != null)
+            // Check if we have the mapped contract in the current data slice
+            var currentContractSymbol = future.Mapped;
+            if (!data.ContainsKey(currentContractSymbol)) return;
+
+            // Get Tick Data
+            var ticks = data.Ticks[currentContractSymbol];
+            if (ticks == null || ticks.Count == 0) return;
+            var currentPrice = ticks.Last().LastPrice;
+
+            // B. ROLLOVER LOGIC
+            // Check if we are holding any OLD contracts that are not the current "Mapped" one
+            foreach (var holding in Portfolio.Values)
             {
-                double currentSharpe = _activeStrategy.GetSharpeRatio();
-                double altSharpe = bestAlternative.GetSharpeRatio();
-
-                Debug($"Review: Active={_activeStrategy.Name}({currentSharpe:N2}) vs BestAlt={bestAlternative.Name}({altSharpe:N2})");
-
-                // Switching Threshold: Only switch if the new strategy is significantly better
-                // (e.g., Sharpe is +0.5 higher) to avoid "whipsawing" between strategies.
-                if (altSharpe > (currentSharpe + 0.5))
+                if (holding.Invested && holding.Symbol.SecurityType == SecurityType.Future)
                 {
-                    Liquidate(_activeSymbol); // Clean slate
-                    _activeStrategy = bestAlternative;
-                    _currentStrategySharpe = altSharpe;
-                    Debug($"Strategy SWITCH: Now trading {_activeStrategy.Name}");
+                    // If the holding is NOT the current front-month contract, we must Roll Over
+                    if (holding.Symbol != currentContractSymbol)
+                    {
+                        Debug($"Rolling Over: Selling {holding.Symbol} -> Buying {currentContractSymbol}");
+
+                        // 1. Liquidate the old position
+                        Liquidate(holding.Symbol);
+
+                        // 2. Open position in the new contract (Same direction)
+                        // We re-enter based on the direction we were holding
+                        if (holding.IsLong)
+                        {
+                            SetHoldings(currentContractSymbol, 1.0);
+                            _highWaterMark = currentPrice; // Reset Stop for new price level
+                        }
+                        else if (holding.IsShort)
+                        {
+                            SetHoldings(currentContractSymbol, -1.0);
+                            _lowWaterMark = currentPrice; // Reset Stop for new price level
+                        }
+                        return; // Exit OnData to let the trade settle
+                    }
+                }
+            }
+
+            // C. RISK MANAGEMENT (Trailing Stop on Current Contract)
+            if (Portfolio[currentContractSymbol].Invested)
+            {
+                if (Portfolio[currentContractSymbol].IsLong)
+                {
+                    if (currentPrice > _highWaterMark) _highWaterMark = currentPrice;
+
+                    if (currentPrice < _highWaterMark * (1 - _trailingStopPercent))
+                    {
+                        Liquidate(currentContractSymbol, "Trailing Stop Long");
+                        return;
+                    }
+                }
+                else if (Portfolio[currentContractSymbol].IsShort)
+                {
+                    if (currentPrice < _lowWaterMark) _lowWaterMark = currentPrice;
+
+                    if (currentPrice > _lowWaterMark * (1 + _trailingStopPercent))
+                    {
+                        Liquidate(currentContractSymbol, "Trailing Stop Short");
+                        return;
+                    }
+                }
+            }
+
+            // D. ENTRY LOGIC (Only if not invested)
+            if (!Portfolio.Invested)
+            {
+                // Long: Trend Up + RSI not Overbought
+                if (_fastEma > _slowEma && _rsi < 70)
+                {
+                    SetHoldings(currentContractSymbol, 1.0);
+                    _highWaterMark = currentPrice;
+                    Debug($"Long Entry at {currentPrice}");
+                }
+                // Short: Trend Down + RSI not Oversold
+                else if (_fastEma < _slowEma && _rsi > 30)
+                {
+                    SetHoldings(currentContractSymbol, -1.0);
+                    _lowWaterMark = currentPrice;
+                    Debug($"Short Entry at {currentPrice}");
                 }
             }
         }
-    }
-}
-
-// ------------------------------------------------------------------------------------------------------
-// Strategy Architecture
-// ------------------------------------------------------------------------------------------------------
-
-public interface IStrategy
-{
-    string Name { get; }
-    // CHANGED: Update now accepts TradeBar directly
-    void Update(TradeBar bar);
-    void ExecuteRealOrders(Symbol activeSymbol);
-    void OnEndOfDay();
-
-    // Metrics
-    double GetSharpeRatio();
-    decimal GetVirtualProfit();
-}
-
-/// <summary>
-/// Base class containing Real-World PnL and Sharpe Ratio logic for Shadow Tracking.
-/// </summary>
-public abstract class BaseStrategy : IStrategy
-{
-    public abstract string Name { get; }
-    protected QCAlgorithm Algo;
-    protected Symbol Symbol;
-
-    // Virtual Tracking
-    protected int VirtualPosition = 0;
-    protected decimal VirtualPnL = 0m;
-    protected decimal DailyVirtualPnL = 0m;
-    protected List<double> DailyReturnsPct = new List<double>();
-
-    // Config
-    protected decimal AssumedCapital = 100000m;
-    protected decimal TransactionCostPerTrade = 2.50m; // Approximate commission + slippage
-
-    public BaseStrategy(QCAlgorithm algo, Future future)
-    {
-        Algo = algo;
-        Symbol = future.Symbol;
-    }
-
-    /// <summary>
-    /// Calculates signals and updates Virtual Position/PnL.
-    /// MUST be called by the concrete implementation.
-    /// </summary>
-    // CHANGED: Signature update to accept TradeBar
-    public abstract void Update(TradeBar bar);
-
-    /// <summary>
-    /// Executes physical orders if this strategy is active.
-    /// </summary>
-    public abstract void ExecuteRealOrders(Symbol activeSymbol);
-
-    /// <summary>
-    /// Updates the Virtual PnL based on the price movement and current virtual position.
-    /// </summary>
-    protected void TrackVirtualPerformance(TradeBar bar)
-    {
-        if (VirtualPosition != 0)
-        {
-            // Calculate point change
-            decimal priceChange = bar.Close - bar.Open;
-
-            // Basic PnL approximation: Points * Position * Multiplier
-            // We use a generic multiplier of 50 (standard for many minis) or just points for scoring.
-            // For rigorous accuracy, we would need the contract multiplier.
-            // Let's assume raw points for the score to keep it generic but consistent.
-            decimal profit = priceChange * VirtualPosition * 10m; // Assuming 10 CHF per tick/point roughly
-
-            VirtualPnL += profit;
-            DailyVirtualPnL += profit;
-        }
-    }
-
-    /// <summary>
-    /// Helper to update virtual position and charge costs.
-    /// </summary>
-    protected void SetVirtualPosition(int newPosition)
-    {
-        if (VirtualPosition != newPosition)
-        {
-            // Charge cost for the trade
-            VirtualPnL -= TransactionCostPerTrade;
-            DailyVirtualPnL -= TransactionCostPerTrade;
-            VirtualPosition = newPosition;
-        }
-    }
-
-    public void OnEndOfDay()
-    {
-        // Calculate daily return %
-        double dailyReturn = (double)(DailyVirtualPnL / AssumedCapital);
-        DailyReturnsPct.Add(dailyReturn);
-
-        // Reset daily PnL tracker
-        DailyVirtualPnL = 0m;
-
-        // Force virtual flat at EOD (Day Trading)
-        SetVirtualPosition(0);
-    }
-
-    public double GetSharpeRatio()
-    {
-        if (DailyReturnsPct.Count < 2) return 0.0;
-
-        double mean = DailyReturnsPct.Average();
-        double variance = DailyReturnsPct.Select(r => Math.Pow(r - mean, 2)).Average();
-        double stdDev = Math.Sqrt(variance);
-
-        if (stdDev < 1e-9) return 0.0;
-
-        // Annualized Sharpe (assuming 252 days)
-        return (mean / stdDev) * Math.Sqrt(252);
-    }
-
-    public decimal GetVirtualProfit() => VirtualPnL;
-}
-
-// ------------------------------------------------------------------------------------------------------
-// Concrete Strategies
-// ------------------------------------------------------------------------------------------------------
-
-public class MovingAverageCrossover : BaseStrategy
-{
-    public override string Name => "MA Crossover";
-    private ExponentialMovingAverage _fastEma;
-    private ExponentialMovingAverage _slowEma;
-
-    public MovingAverageCrossover(QCAlgorithm algo, Future future) : base(algo, future)
-    {
-        _fastEma = algo.EMA(Symbol, 9, Resolution.Minute);
-        _slowEma = algo.EMA(Symbol, 20, Resolution.Minute);
-    }
-
-    // CHANGED: Use passed TradeBar directly
-    public override void Update(TradeBar bar)
-    {
-        // 1. Logic
-        if (_fastEma.IsReady && _slowEma.IsReady)
-        {
-            if (_fastEma > _slowEma) SetVirtualPosition(1);
-            else if (_fastEma < _slowEma) SetVirtualPosition(-1);
-        }
-
-        // 2. Track Performance
-        TrackVirtualPerformance(bar);
-    }
-
-    public override void ExecuteRealOrders(Symbol activeSymbol)
-    {
-        // Simply sync real portfolio with virtual decision
-        Algo.SetHoldings(activeSymbol, VirtualPosition);
-    }
-}
-
-public class MeanReversion : BaseStrategy
-{
-    public override string Name => "Mean Reversion";
-    private RelativeStrengthIndex _rsi;
-    private BollingerBands _bb;
-
-    public MeanReversion(QCAlgorithm algo, Future future) : base(algo, future)
-    {
-        _rsi = algo.RSI(Symbol, 14, MovingAverageType.Simple, Resolution.Minute);
-        _bb = algo.BB(Symbol, 20, 2m, MovingAverageType.Simple, Resolution.Minute);
-    }
-
-    // CHANGED: Use passed TradeBar directly
-    public override void Update(TradeBar bar)
-    {
-        if (_rsi.IsReady && _bb.IsReady)
-        {
-            decimal close = bar.Close;
-
-            // Logic: Oversold -> Buy, Overbought -> Sell, Mean -> Exit
-            if (_rsi < 30 && close < _bb.LowerBand) SetVirtualPosition(1);
-            else if (_rsi > 70 && close > _bb.UpperBand) SetVirtualPosition(-1);
-            else if (VirtualPosition == 1 && close >= _bb.MiddleBand) SetVirtualPosition(0);
-            else if (VirtualPosition == -1 && close <= _bb.MiddleBand) SetVirtualPosition(0);
-        }
-
-        TrackVirtualPerformance(bar);
-    }
-
-    public override void ExecuteRealOrders(Symbol activeSymbol)
-    {
-        Algo.SetHoldings(activeSymbol, VirtualPosition);
-    }
-}
-
-public class OpeningRangeBreakout : BaseStrategy
-{
-    public override string Name => "ORB";
-    private decimal _rangeHigh = 0m;
-    private decimal _rangeLow = 0m;
-    private DateTime _openTime;
-    private TimeSpan _rangeDuration = TimeSpan.FromMinutes(30);
-
-    public OpeningRangeBreakout(QCAlgorithm algo, Future future) : base(algo, future)
-    {
-        algo.Schedule.On(algo.DateRules.EveryDay(future.Symbol), algo.TimeRules.AfterMarketOpen(future.Symbol, 0), () =>
-        {
-            _rangeHigh = 0m;
-            _rangeLow = 0m;
-            // Capture session open time
-            _openTime = algo.Time;
-        });
-    }
-
-    // CHANGED: Use passed TradeBar directly
-    public override void Update(TradeBar bar)
-    {
-        // 1. Build Range
-        if (Algo.Time <= _openTime.Add(_rangeDuration))
-        {
-            if (_rangeHigh == 0m || bar.High > _rangeHigh) _rangeHigh = bar.High;
-            if (_rangeLow == 0m || bar.Low < _rangeLow) _rangeLow = bar.Low;
-
-            // No trading during formation
-            SetVirtualPosition(0);
-        }
-        else
-        {
-            // 2. Breakout Logic
-            if (_rangeHigh > 0)
-            {
-                if (bar.Close > _rangeHigh) SetVirtualPosition(1);
-                else if (bar.Close < _rangeLow) SetVirtualPosition(-1);
-            }
-        }
-
-        TrackVirtualPerformance(bar);
-    }
-
-    public override void ExecuteRealOrders(Symbol activeSymbol)
-    {
-        Algo.SetHoldings(activeSymbol, VirtualPosition);
     }
 }

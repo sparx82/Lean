@@ -112,7 +112,7 @@ namespace QuantConnect.Algorithm.CSharp
             else
             {
                 SetStartDate(2020, 1, 1);
-                SetEndDate(2025, 10, 31);
+                SetEndDate(2025, 5, 31);
 
                 future = AddFuture(Futures.Indices.SMI, Resolution.Tick, dataMappingMode: DataMappingMode.OpenInterest, dataNormalizationMode: DataNormalizationMode.BackwardsRatio);
                 future.SetFilter(TimeSpan.Zero, TimeSpan.FromDays(182));
