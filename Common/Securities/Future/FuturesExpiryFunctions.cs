@@ -158,7 +158,7 @@ namespace QuantConnect.Securities.Future
                     }
 
                     // Trading can occur up to 9:30 a.m. Eastern Time (ET) on the 3rd Friday of the contract month
-                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time);
+                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time, Symbol.Create(Futures.Indices.SP500EMini, SecurityType.Future, Market.CME));
                     return thirdFriday.Add(new TimeSpan(13,30,0));
                 })
             },
@@ -221,7 +221,7 @@ namespace QuantConnect.Securities.Future
                     }
 
                     // Trading can occur up to 9:30 a.m. Eastern Time (ET) on the 3rd Friday of the contract month
-                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time);
+                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time, Symbol.Create(Futures.Indices.NASDAQ100EMini, SecurityType.Future, Market.CME));
                     return thirdFriday.Add(new TimeSpan(13,30,0));
                 })
             },
@@ -235,7 +235,7 @@ namespace QuantConnect.Securities.Future
                     }
 
                     // Trading can occur up to 9:30 a.m. Eastern Time (ET) on the 3rd Friday of the contract month
-                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time);
+                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time, Symbol.Create(Futures.Indices.Dow30EMini, SecurityType.Future, Market.CBOT));
                     return thirdFriday.Add(new TimeSpan(13,30,0));
                 })
             },
@@ -249,7 +249,7 @@ namespace QuantConnect.Securities.Future
                     }
 
                     // Trading can occur up to 9:30 a.m. Eastern Time (ET) on the 3rd Friday of the contract month
-                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time);
+                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time, Symbol.Create(Futures.Indices.Russell2000EMini, SecurityType.Future, Market.CME));
                     return thirdFriday.Add(new TimeSpan (13,30,0));
                 })
             },
@@ -3212,7 +3212,7 @@ namespace QuantConnect.Securities.Future
                     }
 
                     // Trading terminates at 9:30 a.m. ET on the 3rd Friday of the contract month.
-                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time);
+                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time, Symbol.Create(Futures.Indices.MicroSP500EMini, SecurityType.Future, Market.CME));
                     return thirdFriday.Add(new TimeSpan(13,30,0));
                 })
             },
@@ -3226,7 +3226,7 @@ namespace QuantConnect.Securities.Future
                     }
 
                     // Trading terminates at 9:30 a.m. ET on the 3rd Friday of the contract month.
-                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time);
+                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time, Symbol.Create(Futures.Indices.MicroNASDAQ100EMini, SecurityType.Future, Market.CME));
                     return thirdFriday.Add(new TimeSpan(13,30,0));
                 })
             },
@@ -3240,7 +3240,7 @@ namespace QuantConnect.Securities.Future
                     }
 
                     // Trading terminates at 9:30 a.m. ET on the 3rd Friday of the contract month.
-                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time);
+                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time, Symbol.Create(Futures.Indices.MicroRussell2000EMini, SecurityType.Future, Market.CME));
                     return thirdFriday.Add(new TimeSpan(13,30,0));
                 })
             },
@@ -3254,7 +3254,7 @@ namespace QuantConnect.Securities.Future
                     }
 
                     // Trading can occur up to 9:30 a.m. Eastern Time (ET) on the 3rd Friday of the contract month
-                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time);
+                    var thirdFriday = FuturesExpiryUtilityFunctions.ThirdFriday(time, Symbol.Create(Futures.Indices.MicroDow30EMini, SecurityType.Future, Market.CBOT));
                     return thirdFriday.Add(new TimeSpan(13,30,0));
                 })
             },
