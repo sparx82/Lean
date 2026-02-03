@@ -192,19 +192,16 @@ namespace QuantConnect.Brokerages
         /// <summary>
         /// Transaction and submit/execution rules will use interactive brokers Fix models
         /// </summary>
-        ///         /// <summary>
-        /// Transaction and submit/execution rules will use dYdX models
-        /// </summary>
-        dYdX,
-
-        /// <summary>
-        /// Transaction and submit/execution rules will use interactive brokers Fix models
-        /// </summary>
         InteractiveBrokersFix,
 
         /// <summary>
+        /// Transaction and submit/execution rules will use dYdX models
+        /// </summary>
+        DYDX,
+
+        /// <summary>
         /// Transaction and submit/execution rules will use interactive brokers Fix models
         /// </summary>
-        Saxo,
+        Saxo
     }
 }

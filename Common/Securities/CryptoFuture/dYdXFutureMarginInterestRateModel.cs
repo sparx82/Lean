@@ -14,21 +14,12 @@
  *
 */
 
-namespace QuantConnect.Orders
+namespace QuantConnect.Securities.CryptoFuture
 {
     /// <summary>
-    /// Wolverine order properties
+    /// The responsibility of this model is to apply future funding rate cash flows to the portfolio based on open positions
     /// </summary>
-    public class WolverineOrderProperties : OrderProperties
+    public class dYdXFutureMarginInterestRateModel : BinanceFutureMarginInterestRateModel
     {
-        /// <summary>
-        /// The exchange post fix to apply if any
-        /// </summary>
-        public string ExchangePostFix { get; set; }
-
-        /// <summary>
-        /// Can optionally specify the position side in the order direction (buy-to-open, sell-to-close, etc.) instead of the default handling
-        /// </summary>
-        public OrderPosition? PositionSide { get; set; }
     }
 }
