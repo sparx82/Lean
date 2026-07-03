@@ -11,35 +11,39 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
 */
 
-namespace QuantConnect.Brokerages.Authentication
+namespace QuantConnect.Optimizer
 {
     /// <summary>
-    /// Represents credentials required for token-based authentication,
-    /// including the access token and its type (e.g., Bearer).
+    /// Sharpe ratio statistics across all used backtests in an optimization.
     /// </summary>
-    public class TokenCredentials
+    public class SharpeSummary
     {
         /// <summary>
-        /// Gets the type of the token (e.g., Bearer).
+        /// Arithmetic mean of Sharpe ratios.
         /// </summary>
-        public TokenType TokenType { get; }
+        public decimal Mean { get; set; }
 
         /// <summary>
-        /// Gets the token string used for authentication.
+        /// Sample standard deviation of Sharpe ratios.
         /// </summary>
-        public string AccessToken { get; }
+        public decimal StdDev { get; set; }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="TokenCredentials"/> class.
+        /// Minimum Sharpe ratio observed.
         /// </summary>
-        /// <param name="tokenType">The type of the token.</param>
-        /// <param name="accessToken">The token string.</param>
-        public TokenCredentials(TokenType tokenType, string accessToken)
-        {
-            TokenType = tokenType;
-            AccessToken = accessToken;
-        }
+        public decimal Min { get; set; }
+
+        /// <summary>
+        /// Maximum Sharpe ratio observed.
+        /// </summary>
+        public decimal Max { get; set; }
+
+        /// <summary>
+        /// Median Sharpe ratio.
+        /// </summary>
+        public decimal Median { get; set; }
     }
 }

@@ -195,8 +195,10 @@ namespace QuantConnect.Brokerages
             switch (brokerage)
             {
                 case BrokerageName.Default:
-                case BrokerageName.TerminalLink:
                     return new DefaultBrokerageModel(accountType);
+
+                case BrokerageName.TerminalLink:
+                    return new TerminalLinkBrokerageModel(accountType);
 
                 case BrokerageName.Alpaca:
                     return new AlpacaBrokerageModel();
@@ -291,9 +293,14 @@ namespace QuantConnect.Brokerages
                 case BrokerageName.DYDX:
                     return new dYdXBrokerageModel(accountType);
 
+                case BrokerageName.Webull:
+                    return new WebullBrokerageModel(accountType);
+
+                case BrokerageName.Public:
+                    return new PublicBrokerageModel(accountType);
+
                 case BrokerageName.Saxo:
                     return new SaxoBrokerageModel(accountType);
-
                 default:
                     throw new ArgumentOutOfRangeException(nameof(brokerage), brokerage, null);
             }
@@ -396,9 +403,6 @@ namespace QuantConnect.Brokerages
 
                 case TastytradeBrokerageModel:
                     return BrokerageName.Tastytrade;
-
-                case SaxoBrokerageModel _:
-                    return BrokerageName.Saxo;
 
                 case DefaultBrokerageModel _:
                     return BrokerageName.Default;

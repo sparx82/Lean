@@ -14,19 +14,22 @@
  *
 */
 
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
+using QuantConnect.Algorithm;
+using QuantConnect.AlgorithmFactory.Python.Wrappers;
 using QuantConnect.Brokerages;
 using QuantConnect.Configuration;
 using QuantConnect.Interfaces;
+using QuantConnect.Lean.Engine.Results.Analysis;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Packets;
 using QuantConnect.Securities.Positions;
 using QuantConnect.Statistics;
 using QuantConnect.Util;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 namespace QuantConnect.Lean.Engine.Results
 {
@@ -58,6 +61,11 @@ namespace QuantConnect.Lean.Engine.Results
         private DateTime _nextSample;
         private string _algorithmId;
         private int _projectId;
+
+        /// <summary>
+        /// Whether or not to run the results analysis at the end of the backtest.
+        /// </summary>
+        protected bool RunResultsAnalysis { get; set; } = true;
 
         /// <summary>
         /// A dictionary containing summary statistics
@@ -323,7 +331,8 @@ namespace QuantConnect.Lean.Engine.Results
                             null, // null order events, we store them separately
                             result.Results.TotalPerformance,
                             result.Results.AlgorithmConfiguration,
-                            result.Results.State));
+                            result.Results.State,
+                            result.Results.Analysis));
 
                         if (result.Results.Charts.TryGetValue(PortfolioMarginKey, out var marginChart))
                         {
@@ -396,6 +405,26 @@ namespace QuantConnect.Lean.Engine.Results
                 // Save summary results
                 SaveResults($"{AlgorithmId}-summary.json", CreateResultSummary(result));
 
+                // Run backtest analyzer
+                if (RunResultsAnalysis)
+                {
+                    var algorithm = _job.Language == Language.Python ? (Algorithm as AlgorithmPythonWrapper)?.BaseAlgorithm : Algorithm as QCAlgorithm;
+                    List<string> logs;
+                    lock (LogStore)
+                    {
+                        logs = LogStore.Select(x => x.Message).ToList();
+                    }
+                    var analyzer = new ResultsAnalyzer(result.Results, algorithm, _job.Language, logs);
+                    try
+                    {
+                        result.Results.Analysis = analyzer.Run();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "Error running backtest analysis");
+                    }
+                }
+
                 //Place result into storage.
                 StoreResult(result);
 
@@ -440,6 +469,7 @@ namespace QuantConnect.Lean.Engine.Results
         /// <param name="message">Message we'd like shown in console.</param>
         public virtual void DebugMessage(string message)
         {
+            message = FormatMessage(message);
             Messages.Enqueue(new DebugPacket(_projectId, AlgorithmId, CompileId, message));
             AddToLogStore(message);
         }
@@ -450,6 +480,7 @@ namespace QuantConnect.Lean.Engine.Results
         /// <param name="message">Message we'd like shown in console.</param>
         public virtual void SystemDebugMessage(string message)
         {
+            message = FormatMessage(message);
             Messages.Enqueue(new SystemDebugPacket(_projectId, AlgorithmId, CompileId, message));
             AddToLogStore(message);
         }
@@ -460,6 +491,7 @@ namespace QuantConnect.Lean.Engine.Results
         /// <param name="message">Message we'd in the log.</param>
         public virtual void LogMessage(string message)
         {
+            message = FormatMessage(message);
             Messages.Enqueue(new LogPacket(AlgorithmId, message));
             AddToLogStore(message);
         }
@@ -473,8 +505,8 @@ namespace QuantConnect.Lean.Engine.Results
         {
             if (message == _errorMessage) return;
             if (Messages.Count > 500) return;
-            Messages.Enqueue(new HandledErrorPacket(AlgorithmId, message, stacktrace));
             _errorMessage = message;
+            Messages.Enqueue(new HandledErrorPacket(AlgorithmId, FormatMessage(message), stacktrace));
         }
 
         /// <summary>
@@ -485,8 +517,9 @@ namespace QuantConnect.Lean.Engine.Results
         public virtual void RuntimeError(string message, string stacktrace = "")
         {
             PurgeQueue();
-            Messages.Enqueue(new RuntimeErrorPacket(_job.UserId, AlgorithmId, message, stacktrace));
             _errorMessage = message;
+            message = FormatMessage(message);
+            Messages.Enqueue(new RuntimeErrorPacket(_job.UserId, AlgorithmId, message, stacktrace));
             SetAlgorithmState(message, stacktrace);
         }
 

@@ -23,7 +23,6 @@ using System.Linq;
 using Python.Runtime;
 using QuantConnect.Util;
 using static QuantConnect.StringExtensions;
-using QuantConnect.Data.Common;
 using QuantConnect.Python;
 
 namespace QuantConnect.Algorithm
@@ -2244,7 +2243,11 @@ namespace QuantConnect.Algorithm
         }
 
         /// <summary>
-        /// Creates a new StandardDeviation indicator. This will return the population standard deviation of samples over the specified period.
+        /// Creates a new StandardDeviation indicator. This will return the population standard
+        /// deviation of samples over the specified period. By default, it consumes the security's
+        /// price, so the result is the dispersion of price levels, not the asset's volatility.
+        /// To compute volatility, chain this indicator onto a <see cref="LOGR"/> or
+        /// <see cref="ROC"/> indicator using <see cref="IndicatorExtensions.Of"/>.
         /// </summary>
         /// <param name="symbol">The symbol whose STD we want</param>
         /// <param name="period">The period over which to compute the STD</param>
@@ -2809,6 +2812,28 @@ namespace QuantConnect.Algorithm
         }
 
         /// <summary>
+        /// Creates a new WaveTrend Oscillator (WTO) indicator for the symbol.
+        /// The indicator will be automatically updated on the given resolution.
+        /// </summary>
+        /// <param name="symbol">The symbol whose WaveTrend Oscillator we want</param>
+        /// <param name="channelPeriod">The smoothing period for the typical-price EMA and the deviation EMA</param>
+        /// <param name="averagePeriod">The EMA period applied to the channel index to produce the WT1 line</param>
+        /// <param name="signalPeriod">The SMA period applied to WT1 to produce the WT2 signal line</param>
+        /// <param name="resolution">The resolution</param>
+        /// <param name="selector">Selects a value from the BaseData to send into the indicator, if null defaults to casting the input value to a TradeBar</param>
+        /// <returns>The WaveTrendOscillator indicator for the requested symbol</returns>
+        [DocumentationAttribute(Indicators)]
+        public WaveTrendOscillator WTO(Symbol symbol, int channelPeriod, int averagePeriod, int signalPeriod,
+            Resolution? resolution = null, Func<IBaseData, IBaseDataBar> selector = null)
+        {
+            var name = CreateIndicatorName(symbol, $"WTO({channelPeriod},{averagePeriod},{signalPeriod})", resolution);
+            var waveTrendOscillator = new WaveTrendOscillator(name, channelPeriod, averagePeriod, signalPeriod);
+            InitializeIndicator(waveTrendOscillator, resolution, selector, symbol);
+
+            return waveTrendOscillator;
+        }
+
+        /// <summary>
         /// Creates a new Arms Index indicator
         /// </summary>
         /// <param name="symbols">The symbols whose Arms Index we want</param>
@@ -3135,31 +3160,45 @@ namespace QuantConnect.Algorithm
         /// <returns>The SubscriptionDataConfig for the specified symbol</returns>
         private SubscriptionDataConfig GetSubscription(Symbol symbol, TickType? tickType = null)
         {
-            SubscriptionDataConfig subscription;
-            try
+            if (!TryGetSubscription(symbol, tickType, out var subscription))
             {
-                // deterministic ordering is required here
-                var subscriptions = SubscriptionManager.SubscriptionDataConfigService
-                    .GetSubscriptionDataConfigs(symbol)
-                    // make sure common lean data types are at the bottom
-                    .OrderByDescending(x => LeanData.IsCommonLeanDataType(x.Type))
-                    .ThenBy(x => x.TickType)
-                    .ToList();
+                // The symbol was not manually subscribed to. Mirror the behavior of order submission
+                // (see GetSecurityForOrder): add the security automatically so users can register
+                // indicators and consolidators without a prior AddSecurity()/AddEquity() call.
+                if (CanAutoAddSecurity(symbol))
+                {
+                    AddSecurity(symbol);
+                    TryGetSubscription(symbol, tickType, out subscription);
+                }
 
-                // find our subscription
-                subscription = subscriptions.FirstOrDefault(x => tickType == null || tickType == x.TickType);
                 if (subscription == null)
                 {
-                    // if we can't locate the exact subscription by tick type just grab the first one we find
-                    subscription = subscriptions.First();
+                    // this will happen if we did not find the subscription, let's give the user a decent error message
+                    throw new Exception($"Please register to receive data for symbol \'{symbol}\' using the AddSecurity() function.");
                 }
             }
-            catch (InvalidOperationException)
-            {
-                // this will happen if we did not find the subscription, let's give the user a decent error message
-                throw new Exception($"Please register to receive data for symbol \'{symbol}\' using the AddSecurity() function.");
-            }
             return subscription;
+        }
+
+        /// <summary>
+        /// Gets the subscription for the given symbol and optional tick type
+        /// </summary>
+        /// <returns>True if a subscription was found for the symbol; false otherwise</returns>
+        private bool TryGetSubscription(Symbol symbol, TickType? tickType, out SubscriptionDataConfig subscription)
+        {
+            // deterministic ordering is required here
+            var subscriptions = SubscriptionManager.SubscriptionDataConfigService
+                .GetSubscriptionDataConfigs(symbol)
+                // make sure common lean data types are at the bottom
+                .OrderByDescending(x => LeanData.IsCommonLeanDataType(x.Type))
+                .ThenBy(x => x.TickType)
+                .ToList();
+
+            // find our subscription
+            subscription = subscriptions.FirstOrDefault(x => tickType == null || tickType == x.TickType)
+                // if we can't locate the exact subscription by tick type just grab the first one we find
+                ?? subscriptions.FirstOrDefault();
+            return subscription != null;
         }
 
         /// <summary>

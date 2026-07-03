@@ -80,6 +80,18 @@ namespace QuantConnect
             = new Dictionary<IntPtr, PythonActivator>();
 
         /// <summary>
+        /// Prefixes the given message with the provided algorithm time, producing the standard
+        /// timestamped format shared by algorithm logs and messages
+        /// </summary>
+        /// <param name="message">The message to prefix</param>
+        /// <param name="algorithmTime">The algorithm time to prefix the message with</param>
+        /// <returns>The message prefixed with the algorithm time</returns>
+        public static string PrefixWithAlgorithmTime(this string message, DateTime algorithmTime)
+        {
+            return $"{algorithmTime.ToStringInvariant(DateFormat.UI)} {message}";
+        }
+
+        /// <summary>
         /// Maintains old behavior of NodaTime's (&lt; 2.0) daylight savings mapping.
         /// We keep the old behavior to ensure the FillForwardEnumerator does not get stuck on an infinite loop.
         /// The test `ConvertToSkipsDiscontinuitiesBecauseOfDaylightSavingsStart_AddingOneHour` and other related tests
@@ -4556,6 +4568,19 @@ namespace QuantConnect
             }
 
             return result.Value;
+        }
+
+        /// <summary>
+        /// Returns a new sorted list of (v[i] / v[i-1] - 1) values. The first key is dropped.
+        /// </summary>
+        public static SortedList<DateTime, decimal> PercentChange(this SortedList<DateTime, decimal> values)
+        {
+            var result = new SortedList<DateTime, decimal>();
+            foreach (var (current, previous) in values.Skip(1).Zip(values, (current, previous) => (current, previous)))
+            {
+                result.Add(current.Key, current.Value / previous.Value - 1);
+            }
+            return result;
         }
 
         /// <summary>

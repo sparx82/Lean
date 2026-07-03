@@ -38,6 +38,7 @@ using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Lean.Engine.Setup;
 using QuantConnect.Indicators;
 using QuantConnect.Scheduling;
+using QuantConnect.Lean.Engine.RealTime;
 
 namespace QuantConnect.Research
 {
@@ -91,6 +92,7 @@ namespace QuantConnect.Research
         {
             try
             {
+                Messages.SetAlgorithmLanguage(_isPythonNotebook ? Language.Python : Language.CSharp);
                 using (Py.GIL())
                 {
                     _pandas = Py.Import("pandas");
@@ -135,6 +137,8 @@ namespace QuantConnect.Research
                     DeploymentTarget = Config.GetValue("deployment-target", DeploymentTarget.LocalPlatform)
                 };
 
+                Logging.Log.Initialize(algorithmPacket.UserId, algorithmPacket.ProjectId, algorithmPacket.AlgorithmId);
+
                 ProjectId = algorithmPacket.ProjectId;
                 systemHandlers.LeanManager.Initialize(systemHandlers,
                     algorithmHandlers,
@@ -142,6 +146,10 @@ namespace QuantConnect.Research
                     new AlgorithmManager(false));
                 systemHandlers.LeanManager.SetAlgorithm(this);
 
+                var realTimeHandler = composer.GetPart<IRealTimeHandler>();
+                var algorithmManager = new AlgorithmManager(false, algorithmPacket);
+                realTimeHandler.Setup(this, algorithmPacket, algorithmHandlers.Results, systemHandlers.Api, algorithmManager.TimeLimit);
+                Schedule.SetEventSchedule(realTimeHandler);
 
                 algorithmHandlers.DataPermissionsManager.Initialize(algorithmPacket);
 
@@ -858,7 +866,7 @@ namespace QuantConnect.Research
         /// <summary>
         /// Get's the universe data for the specified date
         /// </summary>
-        private IEnumerable<T> GetChainHistory<T>(Symbol canonicalSymbol, DateTime date, out BaseData underlyingData)
+        private IReadOnlyList<T> GetChainHistory<T>(Symbol canonicalSymbol, DateTime date, out BaseData underlyingData)
             where T : BaseChainUniverseData
         {
             // Use this GetEntry extension method since it's data type dependent, so we get the correct entry for the option universe
@@ -872,17 +880,17 @@ namespace QuantConnect.Research
             if (universeData is not null)
             {
                 underlyingData = universeData.Underlying;
-                return universeData.Data.Cast<T>();
+                return new CastingEnumerable<BaseData, T>(universeData.Data);
             }
 
             underlyingData = null;
-            return Enumerable.Empty<T>();
+            return Enumerable.Empty<T>().ToList();
         }
 
         /// <summary>
         /// Helper method to get option/future chain historical data for a given date range
         /// </summary>
-        private IEnumerable<(DateTime Date, IEnumerable<T> ChainData, BaseData UnderlyingData)> GetChainHistory<T>(
+        private IEnumerable<(DateTime Date, IReadOnlyList<T> ChainData, BaseData UnderlyingData)> GetChainHistory<T>(
             Security security, DateTime start, DateTime end, bool extendedMarketHours)
             where T : BaseChainUniverseData
         {
@@ -934,6 +942,7 @@ namespace QuantConnect.Research
             var history = History(universe, start, endDate);
 
             HashSet<Symbol> filteredSymbols = null;
+            SecurityType? filteredSecurityType = null;
             Func<BaseDataCollection, BaseDataCollection> processDataPoint = dataPoint =>
             {
                 var utcTime = dataPoint.EndTime.ConvertToUtc(universe.Configuration.ExchangeTimeZone);
@@ -941,14 +950,28 @@ namespace QuantConnect.Research
                 if (!ReferenceEquals(selection, Universe.Unchanged))
                 {
                     filteredSymbols = selection.ToHashSet();
+                    filteredSecurityType = filteredSymbols.FirstOrDefault()?.ID.SecurityType;
                 }
-                dataPoint.Data = dataPoint.Data.Where(x => filteredSymbols == null || filteredSymbols.Contains(x.Symbol)).ToList();
+                dataPoint.Data = FilterUniverseData(dataPoint.Data, filteredSymbols, filteredSecurityType);
                 return dataPoint;
             };
 
             Func<BaseDataCollection, DateTime> getTime = dataPoint => dataPoint.EndTime.Date;
 
             return PerformSelection<BaseDataCollection, BaseDataCollection>(history, processDataPoint, getTime, start, endDate, dateRule);
+        }
+
+        private static List<BaseData> FilterUniverseData(List<BaseData> data, HashSet<Symbol> filteredSymbols, SecurityType? filteredSecurityType)
+        {
+            return data.Where(x =>
+                filteredSymbols == null ||
+                filteredSymbols.Contains(x.Symbol) ||
+                (filteredSecurityType.HasValue && x.Symbol.SecurityType != filteredSecurityType.Value &&
+                 filteredSymbols.Any(s =>
+                     CurrencyPairUtil.TryDecomposeCurrencyPair(s, out var baseCurrency, out var quoteCurrency) &&
+                     (x.Symbol.Value.Equals(baseCurrency, StringComparison.OrdinalIgnoreCase) ||
+                      x.Symbol.Value.Equals(quoteCurrency, StringComparison.OrdinalIgnoreCase))))
+            ).ToList();
         }
 
         /// <summary>

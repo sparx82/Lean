@@ -200,6 +200,12 @@ namespace QuantConnect.Api
         /// Number of days of out of sample days
         /// </summary>
         public int? OutOfSampleDays { get; set; }
+
+        /// <summary>
+        /// Backtest analysis results.
+        /// </summary>
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        public IReadOnlyList<Analysis> Analysis { get; set; }
     }
 
     /// <summary>
@@ -233,7 +239,7 @@ namespace QuantConnect.Api
         public decimal? Drawdown { get; set; }
 
         /// <summary>
-        /// The ratio of the number of losing trades to the total number of trades
+        /// The ratio of the number of trades with zero or negative profit loss to the total number of trades
         /// </summary>
         public decimal? LossRate { get; set; }
 
@@ -273,7 +279,7 @@ namespace QuantConnect.Api
         public decimal? TreynorRatio { get; set; }
 
         /// <summary>
-        /// The ratio of the number of winning trades to the total number of trades
+        /// The ratio of the number of trades with positive profit loss to the total number of trades
         /// </summary>
         public decimal? WinRate { get; set; }
 
