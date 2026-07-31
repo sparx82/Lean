@@ -299,8 +299,12 @@ namespace QuantConnect.Brokerages
                 case BrokerageName.Public:
                     return new PublicBrokerageModel(accountType);
 
+                case BrokerageName.BloombergFix:
+                    return new BloombergFixBrokerageModel(accountType);
+
                 case BrokerageName.Saxo:
                     return new SaxoBrokerageModel(accountType);
+
                 default:
                     throw new ArgumentOutOfRangeException(nameof(brokerage), brokerage, null);
             }
@@ -403,6 +407,12 @@ namespace QuantConnect.Brokerages
 
                 case TastytradeBrokerageModel:
                     return BrokerageName.Tastytrade;
+
+                case WebullBrokerageModel:
+                    return BrokerageName.Webull;
+
+                case PublicBrokerageModel:
+                    return BrokerageName.Public;
 
                 case DefaultBrokerageModel _:
                     return BrokerageName.Default;

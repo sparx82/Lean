@@ -209,6 +209,11 @@ namespace QuantConnect.Brokerages
         /// </summary>
         Public,
 
+        /// <summary>
+        /// Transaction and submit/execution rules will use bloomberg fix models
+        /// </summary>
+        BloombergFix.
+
         Saxo
     }
 }
