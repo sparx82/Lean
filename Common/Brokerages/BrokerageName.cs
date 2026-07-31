@@ -212,7 +212,7 @@ namespace QuantConnect.Brokerages
         /// <summary>
         /// Transaction and submit/execution rules will use bloomberg fix models
         /// </summary>
-        BloombergFix.
+        BloombergFix,
 
         Saxo
     }

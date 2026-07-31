@@ -137,4 +137,3 @@ public class BasicTemplateFrameworkAlgorithm : QCAlgorithm, IRegressionAlgorithm
             {"OrderListHash", "f209ed42701b0419858e0100595b40c0"}
         };
     }
-}
