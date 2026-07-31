@@ -414,6 +414,9 @@ namespace QuantConnect.Brokerages
                 case PublicBrokerageModel:
                     return BrokerageName.Public;
 
+                case BloombergFixBrokerageModel _:
+                    return BrokerageName.BloombergFix;
+
                 case DefaultBrokerageModel _:
                     return BrokerageName.Default;
 
