@@ -200,6 +200,38 @@ namespace QuantConnect.Tests.Engine.Results
         }
 
         [Test]
+        public void RecapturesStartingPortfolioValueAfterWarmup()
+        {
+            using var api = new Api.Api();
+            using var messaging = new QuantConnect.Messaging.Messaging();
+            var resultHandler = new TestableLiveTradingResultHandler();
+            resultHandler.Initialize(new(new LiveNodePacket(), messaging, api, new BacktestingTransactionHandler(), null));
+
+            try
+            {
+                var algorithm = new AlgorithmStub();
+                algorithm.SetCash(120000);
+
+                // The setup-time snapshot: when the algorithm has a warm-up period, it mixes deploy-time
+                // holdings prices with currency conversion rates seeded at the warm-up start
+                resultHandler.SetAlgorithm(algorithm, 90000);
+                Assert.AreEqual(90000, resultHandler.ExposedStartingPortfolioValue);
+
+                algorithm.SetFinishedWarmingUp();
+                resultHandler.OnWarmupFinished();
+
+                // re-captured once warm-up finished, when the conversion rates are up to date
+                Assert.AreEqual(120000, resultHandler.ExposedStartingPortfolioValue);
+                Assert.AreEqual(120000, resultHandler.ExposedDailyPortfolioValue);
+                Assert.AreEqual(120000, resultHandler.ExposedCumulativeMaxPortfolioValue);
+            }
+            finally
+            {
+                resultHandler.Exit();
+            }
+        }
+
+        [Test]
         public void MessagesArePrefixedWithAlgorithmTime()
         {
             using var messaging = new QuantConnect.Messaging.Messaging();
@@ -413,8 +445,62 @@ namespace QuantConnect.Tests.Engine.Results
             }
         }
 
+        [Test]
+        public void StoredResultsCarryServerStatistics()
+        {
+            using var api = new Api.Api();
+            using var messaging = new QuantConnect.Messaging.Messaging();
+            var deployId = "TestDeployId";
+            var resultHandler = new TestableStoredResultsHandler();
+            resultHandler.Initialize(new(new LiveNodePacket { DeployId = deployId }, messaging, api, new BacktestingTransactionHandler(), null));
+
+            var algorithm = new AlgorithmStub();
+            algorithm.SetFinishedWarmingUp();
+            resultHandler.SetAlgorithm(algorithm, 100000);
+
+            // the final result is stored on exit
+            resultHandler.Exit();
+
+            // the status file and the minute resolution results are the ones the API reads the statistics from
+            foreach (var name in new[] { $"{deployId}.json", $"{deployId}-{DateTime.UtcNow:yyyy-MM-dd}_minute.json" })
+            {
+                var stored = resultHandler.StoredResults.Where(pair => pair.Key.EndsWith(name, StringComparison.InvariantCulture)).ToList();
+                Assert.IsNotEmpty(stored, $"No result was stored for '{name}'");
+
+                foreach (var result in stored)
+                {
+                    Assert.IsNotNull(result.Value.ServerStatistics, $"'{result.Key}' is missing the server statistics");
+                    Assert.IsTrue(result.Value.ServerStatistics.ContainsKey("Hostname"));
+                }
+            }
+        }
+
+        private class TestableStoredResultsHandler : LiveTradingResultHandler
+        {
+            public List<KeyValuePair<string, Result>> StoredResults { get; } = new();
+
+            public override void SaveResults(string name, Result result)
+            {
+                lock (StoredResults)
+                {
+                    StoredResults.Add(new(name, result));
+                }
+            }
+
+            public override string SaveLogs(string id, List<LogEntry> logs)
+            {
+                return string.Empty;
+            }
+        }
+
         private class TestableLiveTradingResultHandler : LiveTradingResultHandler
         {
+            public decimal ExposedStartingPortfolioValue => StartingPortfolioValue;
+
+            public decimal ExposedDailyPortfolioValue => DailyPortfolioValue;
+
+            public decimal ExposedCumulativeMaxPortfolioValue => CumulativeMaxPortfolioValue;
+
             public void PublicTrimCharts(DateTime utcNow) => TrimCharts(utcNow);
         }
 
