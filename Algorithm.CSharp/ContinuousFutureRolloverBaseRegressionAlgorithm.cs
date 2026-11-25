@@ -45,7 +45,7 @@ namespace QuantConnect.Algorithm.CSharp
 
         protected abstract Offset ExchangeToDataTimeZoneOffset { get; }
 
-        protected virtual bool SeedIntialPrices { get; }
+        protected virtual bool SeedInitialPrices { get; }
 
         private DateTimeZone DataTimeZone => TimeZones.Utc;
 
@@ -60,7 +60,7 @@ namespace QuantConnect.Algorithm.CSharp
             SetStartDate(2013, 10, 8);
             SetEndDate(2013, 12, 20);
 
-            Settings.SeedInitialPrices = SeedIntialPrices;
+            Settings.SeedInitialPrices = SeedInitialPrices;
 
             _originalMhdbEntry = MarketHoursDatabase.GetEntry(Market.CME, Ticker, SecurityType.Future);
             var exchangeHours = new SecurityExchangeHours(ExchangeTimeZone,
@@ -158,7 +158,7 @@ namespace QuantConnect.Algorithm.CSharp
                 else if (mappedFuturePrice != 0 || !RolloverHappened)
                 {
                     var mappedFutureData = mappedFuture.GetLastData();
-                    // We only do this check is default securities seeding is desabled, else the mapped contract will have historical data
+                    // We only do this check is default securities seeding is disabled, else the mapped contract will have historical data
                     if ((!Settings.SeedInitialPrices || !ReferenceEquals(MappedContractSeededData, mappedFutureData)) &&
                         continuousContractPrice != mappedFuturePrice)
                     {
@@ -193,7 +193,7 @@ namespace QuantConnect.Algorithm.CSharp
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 ResetMarketHoursDatabase();
                 throw;

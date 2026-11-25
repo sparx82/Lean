@@ -57,7 +57,7 @@ namespace QuantConnect.Tests.Algorithm
             _algorithm.StartDateToUse = new DateTime(2014, 05, 03);
             _algorithm.EndDateToUse = new DateTime(2014, 05, 04);
 
-            var results = AlgorithmRunner.RunLocalBacktest(nameof(TestBenchmarkAlgorithm),
+            AlgorithmRunner.RunLocalBacktest(nameof(TestBenchmarkAlgorithm),
                 new Dictionary<string, string> { { PerformanceMetrics.TotalOrders, "0" } },
                 Language.CSharp,
                 AlgorithmStatus.Completed,
@@ -149,6 +149,38 @@ namespace QuantConnect.Tests.Algorithm
             }
         }
 
+        [TestCase(Language.CSharp)]
+        [TestCase(Language.Python)]
+        public void NullBenchmarkDisablesTheBenchmark(Language language)
+        {
+            var algorithm = new QCAlgorithm();
+            var dataManager = new DataManagerStub(algorithm, new MockDataFeed());
+            algorithm.SubscriptionManager.SetDataManager(dataManager);
+
+            if (language == Language.CSharp)
+            {
+                algorithm.SetBenchmark((Symbol)null);
+            }
+            else
+            {
+                using var _ = Py.GIL();
+                using var module = PyModule.FromString(nameof(NullBenchmarkDisablesTheBenchmark), @"
+def set_benchmark(algorithm):
+    algorithm.set_benchmark(None)
+");
+                using var pyAlgorithm = algorithm.ToPython();
+                using var setBenchmark = module.GetAttr("set_benchmark");
+                setBenchmark.Invoke(pyAlgorithm);
+            }
+
+            algorithm.PostInitialize();
+
+            // The default brokerage model benchmark is not used and no benchmark security is added
+            Assert.IsInstanceOf<FuncBenchmark>(algorithm.Benchmark);
+            Assert.AreEqual(0m, algorithm.Benchmark.Evaluate(new DateTime(2024, 1, 2)));
+            Assert.IsEmpty(algorithm.Securities);
+        }
+
         [Test]
         public void BenchmarkIsNotInitializeWithCustomSecurityInitializer()
         {
@@ -178,7 +210,7 @@ namespace QuantConnect.Tests.Algorithm
             algorithm.StartDateToUse = new DateTime(2013, 10, 07);
             algorithm.EndDateToUse = new DateTime(2013, 10, 11);
 
-            var results = AlgorithmRunner.RunLocalBacktest(nameof(TestBenchmarkAlgorithm),
+            AlgorithmRunner.RunLocalBacktest(nameof(TestBenchmarkAlgorithm),
                 new Dictionary<string, string> { { PerformanceMetrics.TotalOrders, "0" } },
                 Language.CSharp,
                 AlgorithmStatus.Completed,

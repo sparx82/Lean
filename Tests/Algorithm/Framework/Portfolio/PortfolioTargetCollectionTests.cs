@@ -14,6 +14,7 @@
 */
 using System;
 using System.Linq;
+using System.Collections.Generic;
 using NUnit.Framework;
 using QuantConnect.Algorithm;
 using QuantConnect.Algorithm.Framework.Portfolio;
@@ -36,11 +37,11 @@ namespace QuantConnect.Tests.Algorithm.Framework.Portfolio
         {
             var collection = new PortfolioTargetCollection();
 
-            Assert.IsFalse(collection.TryGetValue(Symbols.SPY, out var target));
+            Assert.IsFalse(collection.TryGetValue(Symbols.SPY, out _));
 
             collection[Symbols.SPY] = new PortfolioTarget(Symbols.SPY, 1);
 
-            Assert.IsTrue(collection.TryGetValue(Symbols.SPY, out target));
+            Assert.IsTrue(collection.TryGetValue(Symbols.SPY, out var target));
             Assert.AreEqual(target, collection[Symbols.SPY]);
         }
 
@@ -111,6 +112,36 @@ namespace QuantConnect.Tests.Algorithm.Framework.Portfolio
             Assert.AreEqual(1, collection.Values.Count(target => target == targets[1]));
             Assert.AreEqual(1, collection.Keys.Count(symbol => symbol == Symbols.SPY));
             Assert.AreEqual(1, collection.Keys.Count(symbol => symbol == Symbols.AAPL));
+        }
+
+        [Test]
+        public void AddKeyValuePair()
+        {
+            var target = new PortfolioTarget(Symbols.SPY, 1);
+            var collection = new PortfolioTargetCollection();
+            collection.Add(new KeyValuePair<Symbol, IPortfolioTarget>(Symbols.SPY, target));
+            Assert.AreEqual(1, collection.Count);
+            Assert.AreEqual(target, collection[Symbols.SPY]);
+
+            var otherTarget = new PortfolioTarget(Symbols.AAPL, 1);
+            ICollection<KeyValuePair<Symbol, IPortfolioTarget>> kvpCollection = collection;
+            kvpCollection.Add(new KeyValuePair<Symbol, IPortfolioTarget>(Symbols.AAPL, otherTarget));
+            Assert.AreEqual(2, collection.Count);
+            Assert.AreEqual(otherTarget, collection[Symbols.AAPL]);
+        }
+
+        [Test]
+        public void ContainsKeyValuePair()
+        {
+            var target = new PortfolioTarget(Symbols.SPY, 1);
+            var collection = new PortfolioTargetCollection { target };
+            ICollection<KeyValuePair<Symbol, IPortfolioTarget>> kvpCollection = collection;
+
+            Assert.IsTrue(kvpCollection.Contains(new KeyValuePair<Symbol, IPortfolioTarget>(Symbols.SPY, target)));
+            Assert.IsTrue(collection.Contains(new KeyValuePair<Symbol, IPortfolioTarget>(Symbols.SPY, target)));
+            // a different target for the same symbol is not the same pair
+            Assert.IsFalse(kvpCollection.Contains(new KeyValuePair<Symbol, IPortfolioTarget>(Symbols.SPY, new PortfolioTarget(Symbols.SPY, 1))));
+            Assert.IsFalse(kvpCollection.Contains(new KeyValuePair<Symbol, IPortfolioTarget>(Symbols.AAPL, target)));
         }
 
         [Test]

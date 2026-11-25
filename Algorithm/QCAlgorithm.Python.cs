@@ -310,7 +310,7 @@ namespace QuantConnect.Algorithm
             Func<IEnumerable<Fundamental>, object> fundamentalSelector;
             Universe universe;
 
-            if (pyObject.TryCreateType(out var type))
+            if (pyObject.TryCreateType(out _))
             {
                 return AddUniverse(pyObject, null, null);
             }
@@ -368,7 +368,7 @@ namespace QuantConnect.Algorithm
                 // pass
             }
 
-            if (pyObject.TryCreateType(out var type))
+            if (pyObject.TryCreateType(out _))
             {
                 return AddUniverse(pyObject, null, pyfine);
             }
@@ -586,6 +586,43 @@ namespace QuantConnect.Algorithm
         }
 
         /// <summary>
+        /// Creates a new Time-Series Information Coefficient (TSIC) indicator for a Python signal, such as a custom indicator.
+        /// The indicator will be automatically updated on the given resolution.
+        /// </summary>
+        /// <param name="symbol">The asset whose returns the signal times</param>
+        /// <param name="signal">The signal whose information coefficient to measure. The indicator updates it, so it must not be updated elsewhere</param>
+        /// <param name="period">The number of signal values and next returns to correlate</param>
+        /// <param name="resolution">The resolution</param>
+        /// <param name="selector">Selects a value from the BaseData to send into the indicator and its signal, if null defaults to the BaseData itself</param>
+        /// <returns>The TimeSeriesInformationCoefficient indicator for the given parameters</returns>
+        [DocumentationAttribute(Indicators)]
+        public TimeSeriesInformationCoefficient TSIC(Symbol symbol, PyObject signal, int period, Resolution? resolution = null, Func<IBaseData, IBaseData> selector = null)
+        {
+            return TSIC(symbol, ConvertPythonIndicator(signal), period, resolution, selector);
+        }
+
+        /// <summary>
+        /// Creates a new Cross-Sectional Information Coefficient (CSIC) indicator for a Python signal factory, which may create
+        /// custom indicators. The indicator will be automatically updated on the given resolution.
+        /// </summary>
+        /// <param name="symbols">The assets to correlate across. A period needs at least three. The indicator's Add and Remove methods change them</param>
+        /// <param name="signalFactory">Creates the signal of each asset from its symbol. The indicator updates them, so they must not be updated elsewhere</param>
+        /// <param name="resolution">The resolution</param>
+        /// <param name="selector">Selects a value from the BaseData to send into the indicator and its signals, if null defaults to the BaseData itself</param>
+        /// <returns>The CrossSectionalInformationCoefficient indicator for the given parameters</returns>
+        [DocumentationAttribute(Indicators)]
+        public CrossSectionalInformationCoefficient CSIC(IEnumerable<Symbol> symbols, PyObject signalFactory, Resolution? resolution = null, Func<IBaseData, IBaseData> selector = null)
+        {
+            return CSIC(symbols, symbol =>
+            {
+                using (Py.GIL())
+                {
+                    return ConvertPythonIndicator(signalFactory.Invoke(symbol.ToPython()));
+                }
+            }, resolution, selector);
+        }
+
+        /// <summary>
         /// Registers the consolidator to receive automatic updates as well as configures the indicator to receive updates
         /// from the consolidator.
         /// </summary>
@@ -637,7 +674,9 @@ namespace QuantConnect.Algorithm
 
             try
             {
-                dataConsolidator = new DataConsolidatorPythonWrapper(pyObject);
+                // reuse the wrapper of an earlier registration, a new one would never be disposed on removal
+                dataConsolidator = SubscriptionManager.FindPythonConsolidator(symbol, pyObject)
+                    ?? new DataConsolidatorPythonWrapper(pyObject);
             }
             catch
             {
@@ -1917,7 +1956,7 @@ namespace QuantConnect.Algorithm
         public void AddCommand(PyObject type)
         {
             // create a test instance to validate interface is implemented accurate
-            var testInstance = new CommandPythonWrapper(type);
+            new CommandPythonWrapper(type);
 
             var wrappedType = Extensions.CreateType(type);
             _registeredCommands[wrappedType.Name] = (CallbackCommand command) =>

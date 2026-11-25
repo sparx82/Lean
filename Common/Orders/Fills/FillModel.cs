@@ -37,8 +37,8 @@ namespace QuantConnect.Orders.Fills
         protected FillModelParameters Parameters { get; set; }
 
         /// <summary>
-        /// This is required due to a limitation in PythonNet to resolved overriden methods.
-        /// When Python calls a C# method that calls a method that's overriden in python it won't
+        /// This is required due to a limitation in PythonNet to resolved overridden methods.
+        /// When Python calls a C# method that calls a method that's overridden in python it won't
         /// run the python implementation unless the call is performed through python too.
         /// </summary>
         protected FillModelPythonWrapper PythonWrapper { get; set; }
@@ -505,6 +505,12 @@ namespace QuantConnect.Orders.Fills
             // do not fill on stale data
             if (pricesEndTime <= order.Time) return fill;
 
+            // the whole bar is after the stop triggered, so the limit leg fills like a resting limit order
+            if (IsEntirelyAfterStopTriggered(asset, order, prices))
+            {
+                return InternalLimitFill(asset, order, order.LimitPrice, order.Quantity);
+            }
+
             //Check if the Stop Order was filled: opposite to a limit order
             switch (order.Direction)
             {
@@ -515,6 +521,7 @@ namespace QuantConnect.Orders.Fills
                         if (!order.StopTriggered)
                         {
                             order.StopTriggered = true;
+                            order.StopTriggeredTime = pricesEndTime;
                             Parameters.OnOrderUpdated(order);
                         }
 
@@ -537,6 +544,7 @@ namespace QuantConnect.Orders.Fills
                         if (!order.StopTriggered)
                         {
                             order.StopTriggered = true;
+                            order.StopTriggeredTime = pricesEndTime;
                             Parameters.OnOrderUpdated(order);
                         }
 
@@ -557,6 +565,25 @@ namespace QuantConnect.Orders.Fills
         }
 
         /// <summary>
+        /// Determines whether the given prices are entirely after the stop of the given order was triggered,
+        /// in which case the order can be filled as a resting limit order
+        /// </summary>
+        /// <param name="asset">Security asset we're filling</param>
+        /// <param name="order">Order packet to model</param>
+        /// <param name="prices">The prices to check</param>
+        /// <remarks>Data at the exact trigger time, like ticks sharing the trigger tick time stamp, is not considered to be after it</remarks>
+        protected static bool IsEntirelyAfterStopTriggered(Security asset, StopLimitOrder order, Prices prices)
+        {
+            if (!order.StopTriggeredTime.HasValue)
+            {
+                return false;
+            }
+            var stopTriggeredTime = order.StopTriggeredTime.Value;
+            return prices.Time.ConvertToUtc(asset.Exchange.TimeZone) >= stopTriggeredTime
+                && prices.EndTime.ConvertToUtc(asset.Exchange.TimeZone) > stopTriggeredTime;
+        }
+
+        /// <summary>
         /// Default limit if touched fill model implementation in base class security. (Limit If Touched Order Type)
         /// </summary>
         /// <param name="asset"></param>
@@ -570,7 +597,7 @@ namespace QuantConnect.Orders.Fills
         ///     of the previous tradebar when making a sell (buy) request. Following the behaviour of
         ///     <see cref="StopLimitFill"/>, current quote information is used when determining fill parameters
         ///     (e.g., price, quantity) as the tradebar containing the incoming data is not yet consolidated.
-        ///     This conservative approach, however, can lead to trades not occuring as would be expected when
+        ///     This conservative approach, however, can lead to trades not occurring as would be expected when
         ///     compared to future consolidated data.
         /// </remarks>
         public virtual OrderEvent LimitIfTouchedFill(Security asset, LimitIfTouchedOrder order)
@@ -629,7 +656,7 @@ namespace QuantConnect.Orders.Fills
                         order.TriggerTouched = true;
 
                         //-> 1.1 Limit surpassed: Sell.
-                        if (GetAskPrice(asset, out pricesEndTime) >= order.LimitPrice)
+                        if (GetAskPrice(asset, out _) >= order.LimitPrice)
                         {
                             fill.Status = OrderStatus.Filled;
                             fill.FillPrice = order.LimitPrice;
@@ -645,7 +672,7 @@ namespace QuantConnect.Orders.Fills
                         order.TriggerTouched = true;
 
                         //-> 1.2 Limit surpassed: Buy.
-                        if (GetBidPrice(asset, out pricesEndTime) <= order.LimitPrice)
+                        if (GetBidPrice(asset, out _) <= order.LimitPrice)
                         {
                             fill.Status = OrderStatus.Filled;
                             fill.FillPrice = order.LimitPrice;
@@ -1131,7 +1158,7 @@ namespace QuantConnect.Orders.Fills
 
         /// <summary>
         /// This is required due to a limitation in PythonNet to resolved
-        /// overriden methods. <see cref="GetPrices"/>
+        /// overridden methods. <see cref="GetPrices"/>
         /// </summary>
         protected virtual Prices GetPricesCheckingPythonWrapper(Security asset, OrderDirection direction)
         {

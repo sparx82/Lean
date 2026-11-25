@@ -31,7 +31,7 @@
   </PropertyGroup>
   <Import Project="$(SolutionDir)\.nuget\NuGet.targets" Condition="Exists('$(SolutionDir)\.nuget\NuGet.targets')" />
   <ItemGroup>
-    <PackageReference Include="QuantConnect.pythonnet" Version="2.0.65" />
+    <PackageReference Include="QuantConnect.pythonnet" Version="2.0.70" />
     <PackageReference Include="Accord" Version="3.6.0" />
     <PackageReference Include="Accord.Math" Version="3.6.0" />
     <PackageReference Include="Common.Logging" Version="3.4.1" />
@@ -156,6 +156,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Include="TestData\CashTestingStrategy.csv">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="TestData\cnxnifty_2014.csv">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <Content Include="Research\RegressionScripts\custom_data.py">
@@ -421,6 +424,7 @@
     <ProjectReference Include="..\Engine\QuantConnect.Lean.Engine.csproj" />
     <ProjectReference Include="..\Indicators\QuantConnect.Indicators.csproj" />
     <ProjectReference Include="..\Optimizer\QuantConnect.Optimizer.csproj" />
+    <ProjectReference Include="..\Optimizer.Launcher\QuantConnect.Optimizer.Launcher.csproj" />
     <ProjectReference Include="..\Research\QuantConnect.Research.csproj" />
     <ProjectReference Include="..\Launcher\QuantConnect.Lean.Launcher.csproj" />
     <ProjectReference Include="..\Logging\QuantConnect.Logging.csproj" />

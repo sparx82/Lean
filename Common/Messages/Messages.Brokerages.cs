@@ -55,7 +55,7 @@ namespace QuantConnect
             public static string OrderUpdateNotSupported = "Brokerage does not support update. You must cancel and re-create instead.";
 
             /// <summary>
-            /// Retunrns a string message saying the type of the given security is not supported by the given brokerage
+            /// Returns a string message saying the type of the given security is not supported by the given brokerage
             /// </summary>
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static string UnsupportedSecurityType(IBrokerageModel brokerageModel, Securities.Security security)
@@ -111,6 +111,53 @@ namespace QuantConnect
             }
 
             /// <summary>
+            /// Returns a string message saying the given brokerage model does not support contingent orders
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static string UnsupportedContingentOrders(IBrokerageModel brokerageModel)
+            {
+                return Invariant($"The {brokerageModel.GetType().Name} does not support contingent orders (OCO, OTO, OUO, brackets).");
+            }
+
+            /// <summary>
+            /// Returns a string message saying the contingency type of the given order is unsupported by the given brokerage model.
+            /// It also mentions the supported contingency types
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static string UnsupportedContingencyType(IBrokerageModel brokerageModel, Orders.ContingencyType contingencyType,
+                IEnumerable<Orders.ContingencyType> supportedContingencyTypes)
+            {
+                return Invariant($"The {brokerageModel.GetType().Name} does not support {contingencyType} contingent orders. Only supports [{string.Join(',', supportedContingencyTypes)}]");
+            }
+
+            /// <summary>
+            /// Returns a string message saying the given brokerage model does not support updating contingent orders
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static string UnsupportedContingentOrdersUpdate(IBrokerageModel brokerageModel)
+            {
+                return Invariant($"The {brokerageModel.GetType().Name} does not support updating contingent orders, please cancel and submit them again.");
+            }
+
+            /// <summary>
+            /// Returns a string message saying the given brokerage model does not support updating the quantity of contingent orders
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static string UnsupportedContingentOrdersQuantityUpdate(IBrokerageModel brokerageModel)
+            {
+                return Invariant($"The {brokerageModel.GetType().Name} does not support updating the quantity of contingent orders.");
+            }
+
+            /// <summary>
+            /// Returns a string message saying the shape of the set of contingent orders is unsupported by the given brokerage model
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static string UnsupportedContingentOrdersShape(IBrokerageModel brokerageModel, string reason)
+            {
+                return Invariant($"The {brokerageModel.GetType().Name} does not support this set of contingent orders: {reason}");
+            }
+
+            /// <summary>
             /// Returns a string message saying the Time In Force of the given order is unsupported by the given brokerage
             /// model
             /// </summary>
@@ -137,15 +184,6 @@ namespace QuantConnect
             public static string UnsupportedCrossZeroByOrderType(IBrokerageModel brokerageModel, OrderType orderType)
             {
                 return Invariant($"Order type '{orderType}' is not supported for orders that cross the zero holdings threshold in the {brokerageModel.GetType().Name}. This means you cannot change a position from positive to negative or vice versa using this order type. Please close the existing position first.");
-            }
-
-            /// <summary>
-            /// Returns a message indicating that the specified order type cannot be updated quantity using the given brokerage model.
-            /// </summary>
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public static string UnsupportedUpdateQuantityOrder(IBrokerageModel brokerageModel, OrderType orderType)
-            {
-                return Invariant($"Order type '{orderType}' is not supported to update quantity in the {brokerageModel.GetType().Name}.");
             }
 
             /// <summary>
@@ -180,7 +218,17 @@ namespace QuantConnect
             public static string TradingOutsideRegularHoursNotSupported(IBrokerageModel brokerageModel, OrderType orderType, TimeInForce timeInForce)
             {
                 return Invariant($"The {brokerageModel.GetType().Name} does not support {orderType} orders with {timeInForce} TIF outside regular hours. ") +
-                    Invariant($"Only {OrderType.Limit} orders with {TimeInForce.Day} TIF are supported outside regular trading hours.");
+                    Invariant($"Only {OrderType.Limit} orders with {TimeInForce.Day} or {TimeInForce.GoodTilCanceled} TIF are supported outside regular trading hours.");
+            }
+
+            /// <summary>
+            /// Returns a message indicating that the number of legs of the combo order is not supported by the given brokerage model.
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static string UnsupportedComboOrderLegCount(IBrokerageModel brokerageModel, int legCount)
+            {
+                return Invariant($"The {brokerageModel.GetType().Name} does not support combo orders with {legCount} legs. ") +
+                    Invariant($"A combo order takes from 2 to 4 option legs.");
             }
         }
 
@@ -640,6 +688,57 @@ namespace QuantConnect
             public static string ExtendedMarketOrderMustBeLimit(Orders.Order order)
             {
                 return Invariant($"Orders for extended market must be of type '{nameof(OrderType.Limit)}' and with 'DAY' time-in-force, but {order.Type} was specified.");
+            }
+        }
+
+        /// <summary>
+        /// Provides user-facing messages for the <see cref="Brokerages.EtoroBrokerageModel"/> class and its consumers or related classes
+        /// </summary>
+        public static class EtoroBrokerageModel
+        {
+            /// <summary>
+            /// Returns a message explaining that a short sale needs a stop loss: a stop market order it triggers.
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static string ShortSaleRequiresStopLoss(Orders.Order order)
+            {
+                return Invariant($"A short sale of {order.Symbol.Value} at eToro needs a stop loss: a stop market order the short sale triggers, as a one triggers other or a bracket order. eToro closes the short position at its stop price.");
+            }
+
+            /// <summary>
+            /// Returns a message explaining that a position with leverage above 1 needs a stop loss: a stop market order the entry triggers.
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static string LeverageRequiresStopLoss(Orders.Order order, decimal leverage)
+            {
+                return Invariant($"A position in {order.Symbol.Value} at leverage {leverage} at eToro needs a stop loss: a stop market order the entry triggers, as a one triggers other or a bracket order. eToro closes the position at its stop price.");
+            }
+
+            /// <summary>
+            /// Returns a message explaining that a crypto stop loss has to be at least a given percent away from the price.
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static string CryptoStopLossTooClose(Orders.Order order, decimal price, int minimumPercent)
+            {
+                return Invariant($"The stop loss of {order.Symbol.Value} at eToro has to be at least {minimumPercent}% away from the price {price}: eToro keeps a crypto stop loss that far from the position and moves a closer one there.");
+            }
+
+            /// <summary>
+            /// Returns a message explaining that a stop loss has to be below the price of a long position and above the price of a short one.
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static string StopLossOnTheWrongSide(Orders.Order order, decimal stopPrice, decimal price)
+            {
+                return Invariant($"The stop loss of {order.Symbol.Value} at {stopPrice} is on the wrong side of the price {price}: eToro keeps the stop loss of a long position below the price and that of a short position above it.");
+            }
+
+            /// <summary>
+            /// Returns a message explaining that a take profit has to be above the price of a long position and below the price of a short one.
+            /// </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static string TakeProfitOnTheWrongSide(Orders.Order order, decimal limitPrice, decimal price)
+            {
+                return Invariant($"The take profit of {order.Symbol.Value} at {limitPrice} is on the wrong side of the price {price}: eToro keeps the take profit of a long position above the price and that of a short position below it.");
             }
         }
 

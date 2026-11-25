@@ -58,7 +58,7 @@ namespace QuantConnect
             public static string InvalidInitialMarginRequirement = "Initial margin requirement must be between 0 and 1";
 
             /// <summary>
-            /// String messsage saying: Maintenance margin requirement must be between 0 and 1 
+            /// String message saying: Maintenance margin requirement must be between 0 and 1 
             /// </summary>
             public static string InvalidMaintenanceMarginRequirement = "Maintenance margin requirement must be between 0 and 1";
 
@@ -82,7 +82,7 @@ namespace QuantConnect
             }
 
             /// <summary>
-            /// Returns a string mesage containing information about the order ID, the initial margin and
+            /// Returns a string message containing information about the order ID, the initial margin and
             /// the free margin
             /// </summary>
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -283,7 +283,7 @@ namespace QuantConnect
             }
 
             /// <summary>
-            /// Parses the given CashBook into a string mesage with basic information about it
+            /// Parses the given CashBook into a string message with basic information about it
             /// </summary>
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static string ToString(Securities.CashBook cashBook)
@@ -873,7 +873,7 @@ namespace QuantConnect
                 "Portfolio object is an adaptor for Security Manager. To add a new asset add the required data during initialization.";
 
             /// <summary>
-            /// Returns a string message saying the Portfolio object object is an adaptor for Security Manager and cannot be cleared
+            /// Returns a string message saying the Portfolio object is an adaptor for Security Manager and cannot be cleared
             /// </summary>
             public static string DictionaryClearNotImplemented = "Portfolio object is an adaptor for Security Manager and cannot be cleared.";
 
@@ -970,15 +970,6 @@ namespace QuantConnect
         /// </summary>
         public static class SecurityTransactionManager
         {
-            /// <summary>
-            /// Returns a string message saying CancelOpenOrders operation is not allowed in Initialize or during warm up
-            /// </summary>
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            public static string CancelOpenOrdersNotAllowedOnInitializeOrWarmUp()
-            {
-                return $"This operation is not allowed in {FormatCode("Initialize")} or during warm up: {FormatCode("CancelOpenOrders")}. Please move this code to the {FormatCode("OnWarmupFinished")}() method.";
-            }
-
             /// <summary>
             /// Returns a string message saying the order was canceled by the CancelOpenOrders() at the given time
             /// </summary>

@@ -44,6 +44,7 @@ namespace QuantConnect.Securities.Option.StrategyMatcher
         private readonly ImmutableDictionary<PositionSide, ImmutableHashSet<Symbol>> _sides;
         private readonly ImmutableSortedDictionary<decimal,  ImmutableHashSet<Symbol>> _strikes;
         private readonly ImmutableSortedDictionary<DateTime, ImmutableHashSet<Symbol>> _expirations;
+        private OptionPosition[] _orderedPositions;
 
         /// <summary>
         /// Gets the underlying security's symbol
@@ -126,12 +127,11 @@ namespace QuantConnect.Securities.Option.StrategyMatcher
             if (_rights.Count != 2)
             {
                 // ensure we always have both rights indexed, even if empty
-                ImmutableHashSet<Symbol> value;
-                if (!_rights.TryGetValue(OptionRight.Call, out value))
+                if (!_rights.TryGetValue(OptionRight.Call, out _))
                 {
                     _rights = _rights.SetItem(OptionRight.Call, ImmutableHashSet<Symbol>.Empty);
                 }
-                if (!_rights.TryGetValue(OptionRight.Put, out value))
+                if (!_rights.TryGetValue(OptionRight.Put, out _))
                 {
                     _rights = _rights.SetItem(OptionRight.Put, ImmutableHashSet<Symbol>.Empty);
                 }
@@ -140,16 +140,15 @@ namespace QuantConnect.Securities.Option.StrategyMatcher
             if (_sides.Count != 3)
             {
                 // ensure we always have all three sides indexed, even if empty
-                ImmutableHashSet<Symbol> value;
-                if (!_sides.TryGetValue(PositionSide.None, out value))
+                if (!_sides.TryGetValue(PositionSide.None, out _))
                 {
                     _sides = _sides.SetItem(PositionSide.None, ImmutableHashSet<Symbol>.Empty);
                 }
-                if (!_sides.TryGetValue(PositionSide.Short, out value))
+                if (!_sides.TryGetValue(PositionSide.Short, out _))
                 {
                     _sides = _sides.SetItem(PositionSide.Short, ImmutableHashSet<Symbol>.Empty);
                 }
-                if (!_sides.TryGetValue(PositionSide.Long, out value))
+                if (!_sides.TryGetValue(PositionSide.Long, out _))
                 {
                     _sides = _sides.SetItem(PositionSide.Long, ImmutableHashSet<Symbol>.Empty);
                 }
@@ -569,7 +568,41 @@ namespace QuantConnect.Securities.Option.StrategyMatcher
         /// <returns>An enumerator that can be used to iterate through the collection.</returns>
         public IEnumerator<OptionPosition> GetEnumerator()
         {
-            return _positions.Select(kvp => kvp.Value).GetEnumerator();
+            // hash order depends on per-process string hashes, so a fixed order keeps matching reproducible
+            if (_orderedPositions == null)
+            {
+                var positions = _positions.Values.ToArray();
+                Array.Sort(positions, ComparePositions);
+                _orderedPositions = positions;
+            }
+            return ((IEnumerable<OptionPosition>)_orderedPositions).GetEnumerator();
+        }
+
+        private static int ComparePositions(OptionPosition left, OptionPosition right)
+        {
+            if (left.IsUnderlying != right.IsUnderlying)
+            {
+                return left.IsUnderlying ? -1 : 1;
+            }
+
+            if (!left.IsUnderlying)
+            {
+                var comparison = left.Expiration.CompareTo(right.Expiration);
+                if (comparison == 0)
+                {
+                    comparison = left.Strike.CompareTo(right.Strike);
+                }
+                if (comparison == 0)
+                {
+                    comparison = left.Right.CompareTo(right.Right);
+                }
+                if (comparison != 0)
+                {
+                    return comparison;
+                }
+            }
+
+            return left.Symbol.ID.CompareTo(right.Symbol.ID);
         }
 
         /// <summary>

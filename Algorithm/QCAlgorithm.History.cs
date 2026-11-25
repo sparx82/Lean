@@ -38,6 +38,8 @@ namespace QuantConnect.Algorithm
 
         private bool _dataDictionaryTickWarningSent;
 
+        private readonly LargeHistoryRequestDiagnostics _largeHistoryRequestDiagnostics = new();
+
         /// <summary>
         /// Gets or sets the history provider for the algorithm
         /// </summary>
@@ -811,7 +813,6 @@ namespace QuantConnect.Algorithm
             int attempts = 0, IEnumerable<HistoryRequest> failedRequests = null)
         {
             IEnumerable<HistoryRequest> historyRequests;
-            var isRetry = failedRequests != null;
 
             symbols = symbols?.Where(x => !x.IsCanonical() || x.SecurityType == SecurityType.Future);
 
@@ -1019,7 +1020,9 @@ namespace QuantConnect.Algorithm
         private IEnumerable<Slice> History(IEnumerable<HistoryRequest> requests, DateTimeZone timeZone)
         {
             // filter out any universe securities that may have made it this far
-            var filteredRequests = GetFilterestRequests(requests);
+            var filteredRequests = GetFilteredRequests(requests).ToList();
+
+            _largeHistoryRequestDiagnostics.WarnOnLargeHistoryRequests(filteredRequests, Debug);
 
             // filter out future data to prevent look ahead bias
             var history = HistoryProvider.GetHistory(filteredRequests, timeZone);
@@ -1035,7 +1038,7 @@ namespace QuantConnect.Algorithm
             return history;
         }
 
-        private IEnumerable<HistoryRequest> GetFilterestRequests(IEnumerable<HistoryRequest> requests)
+        private IEnumerable<HistoryRequest> GetFilteredRequests(IEnumerable<HistoryRequest> requests)
         {
             var sentMessage = false;
             foreach (var request in requests.Where(hr => HistoryRequestValid(hr.Symbol)))
@@ -1102,10 +1105,10 @@ namespace QuantConnect.Algorithm
             {
                 var requests = new List<HistoryRequest>();
 
-                foreach (var config in GetMatchingSubscriptions(x, requestedType, resolution))
+                foreach (var config in GetMatchingSubscriptions(x, requestedType, resolution, dataMappingMode: dataMappingMode))
                 {
                     var request = _historyRequestFactory.CreateHistoryRequest(config, startAlgoTz, endAlgoTz, GetExchangeHours(x, requestedType), resolution,
-                        fillForward, extendedMarketHours, dataMappingMode, dataNormalizationMode, contractDepthOffset);
+                        fillForward, extendedMarketHours, GetHistoryDataMappingMode(config, dataMappingMode), dataNormalizationMode, contractDepthOffset);
                     requests.Add(request);
                 }
 
@@ -1145,7 +1148,7 @@ namespace QuantConnect.Algorithm
             return symbols.Where(HistoryRequestValid).SelectMany(symbol =>
             {
                 // Match or create configs for the symbol
-                var configs = GetMatchingSubscriptions(symbol, requestedType, resolution, useAllSubscriptions).ToList();
+                var configs = GetMatchingSubscriptions(symbol, requestedType, resolution, useAllSubscriptions, dataMappingMode).ToList();
                 if (configs.Count == 0)
                 {
                     return Enumerable.Empty<HistoryRequest>();
@@ -1162,9 +1165,24 @@ namespace QuantConnect.Algorithm
                     var end = Time;
 
                     return _historyRequestFactory.CreateHistoryRequest(config, start, end, exchange, res, fillForward,
-                        extendedMarketHours, dataMappingMode, dataNormalizationMode, contractDepthOffset);
+                        extendedMarketHours, GetHistoryDataMappingMode(config, dataMappingMode), dataNormalizationMode, contractDepthOffset);
                 });
             });
+        }
+
+        /// <summary>
+        /// Gets the data mapping mode for a history request, falling back to the market default if the requested one is not available
+        /// </summary>
+        private DataMappingMode? GetHistoryDataMappingMode(SubscriptionDataConfig config, DataMappingMode? dataMappingMode)
+        {
+            var symbol = config.Symbol;
+            // only continuous futures data is mapped, not contracts nor chain universe data
+            if (!dataMappingMode.HasValue || symbol.SecurityType != SecurityType.Future || !symbol.IsCanonical()
+                || !LeanData.IsCommonLeanDataType(config.Type))
+            {
+                return dataMappingMode;
+            }
+            return GetDataMappingModeOrDefault(symbol, dataMappingMode);
         }
 
         private int GetTickTypeOrder(SecurityType securityType, TickType tickType)
@@ -1172,7 +1190,8 @@ namespace QuantConnect.Algorithm
             return SubscriptionManager.AvailableDataTypes[securityType].IndexOf(tickType);
         }
 
-        private IEnumerable<SubscriptionDataConfig> GetMatchingSubscriptions(Symbol symbol, Type type, Resolution? resolution = null, bool useAllSubscriptions = false)
+        private IEnumerable<SubscriptionDataConfig> GetMatchingSubscriptions(Symbol symbol, Type type, Resolution? resolution = null, bool useAllSubscriptions = false,
+            DataMappingMode? dataMappingMode = null)
         {
             var subscriptions = SubscriptionManager.SubscriptionDataConfigService
                 // we add internal subscription so that history requests are covered, this allows us to warm them up too
@@ -1289,7 +1308,9 @@ namespace QuantConnect.Algorithm
                 // Inherit values from existing subscriptions or use defaults
                 var extendedMarketHours = userConfigIfAny?.ExtendedMarketHours ?? UniverseSettings.ExtendedMarketHours;
                 var dataNormalizationMode = userConfigIfAny?.DataNormalizationMode ?? UniverseSettings.GetUniverseNormalizationModeOrDefault(symbol.SecurityType);
-                var dataMappingMode = userConfigIfAny?.DataMappingMode ?? UniverseSettings.GetUniverseMappingModeOrDefault(symbol.SecurityType, symbol.ID.Market);
+                var requestedDataMappingMode = dataMappingMode ?? userConfigIfAny?.DataMappingMode;
+                // only continuous futures data falls back from an unavailable mapping mode, other data types are not mapped
+                var unmappedDataMappingMode = requestedDataMappingMode ?? UniverseSettings.GetUniverseMappingModeOrDefault(symbol.SecurityType, symbol.ID.Market);
                 var contractDepthOffset = userConfigIfAny?.ContractDepthOffset ?? (uint)Math.Abs(UniverseSettings.ContractDepthOffset);
 
                 // If type was specified and not a lean data type and also not abstract, we create a new subscription
@@ -1321,7 +1342,7 @@ namespace QuantConnect.Algorithm
                         LeanData.GetCommonTickTypeForCommonDataTypes(dataType, symbol.SecurityType),
                         true,
                         dataNormalizationMode,
-                        dataMappingMode,
+                        unmappedDataMappingMode,
                         contractDepthOffset)};
                 }
 
@@ -1337,6 +1358,9 @@ namespace QuantConnect.Algorithm
                         // Use the config type to get an accurate mhdb entry
                         var entry = MarketHoursDatabase.GetEntry(symbol, new[] { configType });
                         var res = GetResolution(symbol, resolution, configType);
+                        var configDataMappingMode = LeanData.IsCommonLeanDataType(configType)
+                            ? GetDataMappingModeOrDefault(symbol, requestedDataMappingMode)
+                            : unmappedDataMappingMode;
 
                         return new SubscriptionDataConfig(
                             configType,
@@ -1351,7 +1375,7 @@ namespace QuantConnect.Algorithm
                             x.Item2,
                             true,
                             dataNormalizationMode,
-                            dataMappingMode,
+                            configDataMappingMode,
                             contractDepthOffset);
                     })
                     // lets make sure to respect the order of the data types, if used on a history request will affect outcome when using pushthrough for example
@@ -1553,6 +1577,120 @@ namespace QuantConnect.Algorithm
                 {
                     yield return enumerator.Current;
                 }
+            }
+        }
+
+        /// <summary>
+        /// One-time warnings for history requests likely to stall the algorithm or run it out of memory:
+        /// a single call over the cells threshold, or repeated large calls with overlapping time windows,
+        /// e.g. re-fetching a long lookback every day instead of updating incrementally
+        /// </summary>
+        private sealed class LargeHistoryRequestDiagnostics
+        {
+            private const int OverlappingRequestsWarningCount = 30;
+            private const int OverlappingRequestSizeDivisor = 50;
+            private const int AssumedTicksPerSecond = 10;
+
+            private readonly long _cellsWarningThreshold = Config.GetInt("history-request-cells-warning-threshold", 5000000);
+            private bool _largeRequestWarningSent;
+            private bool _overlappingRequestsWarningSent;
+            private int _consecutiveOverlappingRequests;
+            private DateTime _previousRequestStartUtc;
+            private DateTime _previousRequestEndUtc;
+
+            /// <summary>
+            /// Checks the given requests and emits the applicable warnings through the given debug callback
+            /// </summary>
+            public void WarnOnLargeHistoryRequests(List<HistoryRequest> requests, Action<string> debug)
+            {
+                try
+                {
+                    if (_largeRequestWarningSent && _overlappingRequestsWarningSent || requests.Count == 0)
+                    {
+                        return;
+                    }
+
+                    long estimatedCells = 0;
+                    var startUtc = DateTime.MaxValue;
+                    var endUtc = DateTime.MinValue;
+                    foreach (var request in requests)
+                    {
+                        estimatedCells += EstimateDataCells(request);
+                        if (request.StartTimeUtc < startUtc)
+                        {
+                            startUtc = request.StartTimeUtc;
+                        }
+                        if (request.EndTimeUtc > endUtc)
+                        {
+                            endUtc = request.EndTimeUtc;
+                        }
+                    }
+
+                    if (!_largeRequestWarningSent && estimatedCells >= _cellsWarningThreshold)
+                    {
+                        _largeRequestWarningSent = true;
+                        debug($"Warning: large history request, estimated at ~{estimatedCells.ToStringInvariant("N0")} data cells" +
+                            $" across {requests.Count} request(s). This can be slow and memory intensive: request fewer symbols," +
+                            " a shorter period or a coarser resolution.");
+                    }
+
+                    if (!_overlappingRequestsWarningSent && estimatedCells >= _cellsWarningThreshold / OverlappingRequestSizeDivisor)
+                    {
+                        var overlaps = startUtc < _previousRequestEndUtc && endUtc > _previousRequestStartUtc;
+                        _consecutiveOverlappingRequests = overlaps ? _consecutiveOverlappingRequests + 1 : 0;
+                        _previousRequestStartUtc = startUtc;
+                        _previousRequestEndUtc = endUtc;
+
+                        if (_consecutiveOverlappingRequests >= OverlappingRequestsWarningCount)
+                        {
+                            _overlappingRequestsWarningSent = true;
+                            debug($"Warning: history() has been called {OverlappingRequestsWarningCount}+ consecutive times with" +
+                                " overlapping time windows. Instead of re-fetching a long lookback, fetch it once and keep it updated" +
+                                " with a rolling window, consolidators or indicator warm up.");
+                        }
+                    }
+                }
+                catch (Exception exception)
+                {
+                    // diagnostics must never interfere with the algorithm: log, disable and move on
+                    _largeRequestWarningSent = true;
+                    _overlappingRequestsWarningSent = true;
+                    QuantConnect.Logging.Log.Error(exception);
+                }
+            }
+
+            /// <summary>
+            /// Rough order-of-magnitude estimate of the data cells (bars x columns) a history request will produce
+            /// </summary>
+            private static long EstimateDataCells(HistoryRequest request)
+            {
+                var span = request.EndTimeUtc - request.StartTimeUtc;
+                if (span <= TimeSpan.Zero)
+                {
+                    return 0;
+                }
+
+                // ~5 tradable days a week; sub-daily resolutions only have data during regular market hours
+                var tradableDays = Math.Max(1, span.TotalDays * 5 / 7);
+                double bars;
+                switch (request.Resolution)
+                {
+                    case Resolution.Daily:
+                        bars = tradableDays;
+                        break;
+                    case Resolution.Tick:
+                        // unknowable upfront: liquid symbols see ~10 trades and 100+ quotes per second,
+                        // so 10 data points per second of market time is still on the low side
+                        bars = tradableDays * request.ExchangeHours.RegularMarketDuration.TotalSeconds * AssumedTicksPerSecond;
+                        break;
+                    default:
+                        bars = tradableDays * (request.ExchangeHours.RegularMarketDuration / request.Resolution.ToTimeSpan());
+                        break;
+                }
+
+                // approximate data frame column counts per data point
+                var columns = request.TickType == TickType.Quote ? 10 : request.TickType == TickType.OpenInterest ? 1 : 5;
+                return (long)(bars * columns);
             }
         }
     }

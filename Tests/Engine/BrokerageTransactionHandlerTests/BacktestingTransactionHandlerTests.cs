@@ -30,6 +30,7 @@ using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Orders.Fills;
+using QuantConnect.Packets;
 using QuantConnect.Securities;
 using QuantConnect.Tests.Engine.DataFeeds;
 
@@ -70,14 +71,14 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                 var security = _algorithm.Securities[Ticker];
                 var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 600, 0, 0, 0, DateTime.Now, "");
 
-                // Mock the the order processor
+                // Mock the order processor
                 var orderProcessorMock = new Mock<IOrderProcessor>();
                 orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
                 _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
 
-                var ticket = transactionHandler.AddOrder(orderRequest);
+                transactionHandler.AddOrder(orderRequest);
 
-                var ticket2 = transactionHandler.AddOrder(orderRequest);
+                transactionHandler.AddOrder(orderRequest);
 
                 // 600 after round off becomes 0 -> order is not placed
                 Assert.IsTrue(orderRequest.Response.IsProcessed);
@@ -113,7 +114,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                 orderRequest.SetOrderId(1);
                 orderRequest2.SetOrderId(2);
 
-                // Mock the the order processor
+                // Mock the order processor
                 var orderProcessorMock = new Mock<IOrderProcessor>();
                 orderProcessorMock.Setup(m => m.GetOrderTicket(It.Is<int>(i => i == 1))).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
                 orderProcessorMock.Setup(m => m.GetOrderTicket(It.Is<int>(i => i == 2))).Returns(new OrderTicket(_algorithm.Transactions, orderRequest2));
@@ -131,7 +132,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                             Assert.AreEqual(OrderStatus.Submitted, orderEvent.Status);
 
                             // we send a new order request
-                            var ticket2 = transactionHandler.Process(orderRequest2);
+                            transactionHandler.Process(orderRequest2);
                             break;
                         case 2:
                             Assert.AreEqual(2, orderEvent.OrderId);
@@ -149,7 +150,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                     Log.Trace($"{orderEvent}");
                 };
 
-                var ticket = transactionHandler.Process(orderRequest);
+                transactionHandler.Process(orderRequest);
 
                 Assert.IsTrue(orderRequest.Response.IsProcessed);
                 Assert.IsTrue(orderRequest.Response.IsSuccess);
@@ -193,7 +194,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                 orderRequest.SetOrderId(1);
                 orderRequest2.SetOrderId(2);
 
-                // Mock the the order processor
+                // Mock the order processor
                 var orderProcessorMock = new Mock<IOrderProcessor>();
                 orderProcessorMock.Setup(m => m.GetOrderTicket(It.Is<int>(i => i == 1))).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
                 orderProcessorMock.Setup(m => m.GetOrderTicket(It.Is<int>(i => i == 2))).Returns(new OrderTicket(_algorithm.Transactions, orderRequest2));
@@ -211,7 +212,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                             Assert.AreEqual(OrderStatus.Submitted, orderEvent.Status);
 
                             // we send a new order request
-                            var ticket2 = transactionHandler.Process(orderRequest2);
+                            transactionHandler.Process(orderRequest2);
                             break;
                         case 2:
                             Assert.AreEqual(2, orderEvent.OrderId);
@@ -237,7 +238,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                     Log.Trace($"{orderEvent}");
                 };
 
-                var ticket = transactionHandler.Process(orderRequest);
+                transactionHandler.Process(orderRequest);
 
                 Assert.IsTrue(orderRequest.Response.IsProcessed);
                 Assert.IsTrue(orderRequest.Response.IsSuccess);
@@ -281,7 +282,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                 orderRequest.SetOrderId(1);
                 orderRequest2.SetOrderId(2);
 
-                // Mock the the order processor
+                // Mock the order processor
                 var orderProcessorMock = new Mock<IOrderProcessor>();
                 orderProcessorMock.Setup(m => m.GetOrderTicket(It.Is<int>(i => i == 1))).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
                 orderProcessorMock.Setup(m => m.GetOrderTicket(It.Is<int>(i => i == 2))).Returns(new OrderTicket(_algorithm.Transactions, orderRequest2));
@@ -305,13 +306,13 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                     // Let's place another order before this one is filled
                     if (orderEvent.OrderId == 1 && orderEvent.Status == OrderStatus.Submitted)
                     {
-                        var ticket2 = transactionHandler.Process(orderRequest2);
+                        transactionHandler.Process(orderRequest2);
                     }
 
                     Log.Debug($"{orderEvent}");
                 };
 
-                var ticket = transactionHandler.Process(orderRequest);
+                transactionHandler.Process(orderRequest);
 
                 if (!eventsReceived.WaitOne(10000))
                 {
@@ -390,6 +391,67 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                 Assert.IsTrue(finishedEvent.Wait(10000));
                 Assert.Greater(transactionHandler.ProcessingThreadNames.Count, 1);
                 CollectionAssert.AreEquivalent(orderRequests.Select(x => x.ToString()), transactionHandler.ProcessedRequests.Select(x => x.ToString()));
+            }
+            finally
+            {
+                transactionHandler.Exit();
+            }
+        }
+
+        [Test]
+        public void ProcessesContingentOrdersInLivePaperTrading()
+        {
+            // the fxcm brokerage model doesn't support contingent orders
+            _algorithm.SetBrokerageModel(BrokerageName.Default);
+            _algorithm.SetLiveMode(true);
+            using var brokerage = new PaperBrokerage(_algorithm, new LiveNodePacket());
+            var transactionHandler = new BacktestingTransactionHandler();
+            transactionHandler.Initialize(_algorithm, brokerage, new BacktestingResultHandler());
+
+            try
+            {
+                _algorithm.Transactions.SetOrderProcessor(transactionHandler);
+                var security = _algorithm.Securities[Ticker];
+                _algorithm.Portfolio.CashBook["EUR"].ConversionRate = 1.1m;
+                var time = new DateTime(2025, 07, 03, 10, 0, 0);
+                void Step(decimal price)
+                {
+                    time = time.AddMinutes(1);
+                    _algorithm.SetDateTime(time);
+                    security.SetMarketPrice(new Tick(time, security.Symbol, price, price, price));
+                    // like the live engine on each time loop, scans the paper brokerage
+                    transactionHandler.ProcessSynchronousEvents();
+                }
+                Step(1.10m);
+
+                var tickets = _algorithm.BracketOrder(security.Symbol, 1000, takeProfitPrice: 1.12m, stopLossPrice: 1.05m, limitPrice: 1.09m);
+                var entry = tickets[0];
+                Assert.AreEqual(3, tickets.Count, tickets[0].SubmitRequest.Response.ErrorMessage);
+                var takeProfit = tickets[1];
+                var stopLoss = tickets[2];
+
+                // the transaction threads place the set once all its orders arrived
+                Assert.IsTrue(SpinWait.SpinUntil(() => tickets.All(x => x.Status == OrderStatus.Submitted), 10000),
+                    $"The contingent orders were not submitted: {string.Join(", ", tickets.Select(x => x.Status))}");
+                Assert.IsTrue(takeProfit.Contingency.IsWaitingForTrigger);
+                Assert.IsTrue(stopLoss.Contingency.IsWaitingForTrigger);
+
+                // the children are held even if the price goes through their prices
+                Step(1.13m);
+                Assert.IsTrue(tickets.All(x => x.Status == OrderStatus.Submitted));
+
+                // the entry fills, triggering the children
+                Step(1.08m);
+                Assert.AreEqual(OrderStatus.Filled, entry.Status);
+                Assert.IsTrue(new[] { takeProfit, stopLoss }.All(x => x.Status == OrderStatus.Submitted && !x.Contingency.IsWaitingForTrigger));
+                Assert.AreEqual(1000, security.Holdings.Quantity);
+
+                // the take profit fills, canceling the stop loss
+                Step(1.13m);
+                Assert.AreEqual(OrderStatus.Filled, takeProfit.Status);
+                Assert.AreEqual(OrderStatus.Canceled, stopLoss.Status);
+                Assert.AreEqual(0, security.Holdings.Quantity);
+                Assert.IsEmpty(_algorithm.Transactions.GetOpenOrders());
             }
             finally
             {

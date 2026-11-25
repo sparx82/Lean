@@ -183,6 +183,252 @@ namespace QuantConnect.Tests.Python
             }
         }
 
+        [Test]
+        public void FlattensBaseDataCollectionOfDynamicDataWithHeterogeneousProperties()
+        {
+            var converter = new PandasConverter();
+            var date = new DateTime(2020, 1, 2);
+
+            // Mimics universe data types like FactorsUniverse, where each constituent is a DynamicData
+            // instance carrying its own set of dynamic properties
+            var ibmData = new CustomData { Symbol = Symbols.IBM, Time = date, Value = 1m };
+            ibmData.SetProperty("factor_a", 10m);
+            ibmData.SetProperty("factor_b", 20m);
+
+            var spyData = new CustomData { Symbol = Symbols.SPY, Time = date, Value = 2m };
+            spyData.SetProperty("factor_a", 30m);
+
+            var unlinkedData = new CustomData
+            {
+                Symbol = Symbol.Create("UNLINKED", SecurityType.Base, Market.USA),
+                Time = date,
+                Value = 3m
+            };
+            unlinkedData.SetProperty("factor_c", 40m);
+
+            var data = new[]
+            {
+                new EnumerableData
+                {
+                    Data = new List<BaseData> { ibmData, spyData, unlinkedData },
+                    Symbol = Symbol.Create("universe", SecurityType.Base, Market.USA),
+                    Time = date
+                }
+            };
+
+            dynamic dataFrame = converter.GetDataFrame(data, flatten: true);
+
+            using (Py.GIL())
+            {
+                Assert.IsFalse(dataFrame.empty.AsManagedObject(typeof(bool)));
+
+                var indexNames = dataFrame.index.names.AsManagedObject(typeof(string[]));
+                CollectionAssert.AreEqual(new[] { "time", "symbol" }, indexNames);
+
+                var count = dataFrame.__len__().AsManagedObject(typeof(int));
+                Assert.AreEqual(3, count);
+
+                var columnNames = new List<string>();
+                foreach (var column in dataFrame.columns)
+                {
+                    columnNames.Add(column.__str__().AsManagedObject(typeof(string)));
+                }
+                CollectionAssert.IsSubsetOf(new[] { "value", "factor_a", "factor_b", "factor_c" }, columnNames);
+
+                var symbols = dataFrame.index.get_level_values(1);
+                Assert.Multiple(() =>
+                {
+                    for (var i = 0; i < 3; i++)
+                    {
+                        Assert.AreEqual(data[0].Data[i].Symbol, symbols[i].AsManagedObject(typeof(Symbol)));
+                    }
+
+                    CollectionAssert.AreEqual(new[] { 1d, 2d, 3d }, dataFrame["value"].AsManagedObject(typeof(double[])));
+
+                    // Constituents without a value for a given dynamic property get a missing value in that column
+                    var factorA = (double[])dataFrame["factor_a"].AsManagedObject(typeof(double[]));
+                    Assert.AreEqual(10d, factorA[0]);
+                    Assert.AreEqual(30d, factorA[1]);
+                    Assert.IsTrue(double.IsNaN(factorA[2]));
+
+                    var factorB = (double[])dataFrame["factor_b"].AsManagedObject(typeof(double[]));
+                    Assert.AreEqual(20d, factorB[0]);
+                    Assert.IsTrue(double.IsNaN(factorB[1]));
+                    Assert.IsTrue(double.IsNaN(factorB[2]));
+
+                    var factorC = (double[])dataFrame["factor_c"].AsManagedObject(typeof(double[]));
+                    Assert.IsTrue(double.IsNaN(factorC[0]));
+                    Assert.IsTrue(double.IsNaN(factorC[1]));
+                    Assert.AreEqual(40d, factorC[2]);
+                });
+            }
+        }
+
+        [Test]
+        public void HandlesDynamicDataWithPropertiesAddedInLaterDataPoints()
+        {
+            var converter = new PandasConverter();
+
+            // Mimics data types like Factors, where a dynamic property can be missing in the
+            // first data points and appear later in the series
+            var firstDataPoint = new CustomData { Symbol = Symbols.IBM, Time = new DateTime(2020, 1, 2), Value = 1m };
+            firstDataPoint.SetProperty("factor_a", 10m);
+
+            var secondDataPoint = new CustomData { Symbol = Symbols.IBM, Time = new DateTime(2020, 1, 3), Value = 2m };
+            secondDataPoint.SetProperty("factor_a", 20m);
+            secondDataPoint.SetProperty("factor_b", 30m);
+
+            var data = new List<CustomData> { firstDataPoint, secondDataPoint };
+
+            dynamic dataFrame = converter.GetDataFrame(data);
+
+            using (Py.GIL())
+            {
+                Assert.IsFalse(dataFrame.empty.AsManagedObject(typeof(bool)));
+
+                var count = dataFrame.__len__().AsManagedObject(typeof(int));
+                Assert.AreEqual(2, count);
+
+                Assert.Multiple(() =>
+                {
+                    CollectionAssert.AreEqual(new[] { 1d, 2d }, dataFrame["value"].AsManagedObject(typeof(double[])));
+                    CollectionAssert.AreEqual(new[] { 10d, 20d }, dataFrame["factor_a"].AsManagedObject(typeof(double[])));
+
+                    // The data point without a value for the property gets a missing value in that column
+                    var factorB = (double[])dataFrame["factor_b"].AsManagedObject(typeof(double[]));
+                    Assert.IsTrue(double.IsNaN(factorB[0]));
+                    Assert.AreEqual(30d, factorB[1]);
+                });
+            }
+        }
+
+        [Test]
+        public void HandlesDynamicDataWithHeterogeneousPropertiesAtTheSameTime([Values] bool propertyOnlyInLastDataPoint)
+        {
+            var converter = new PandasConverter();
+            var time = new DateTime(2020, 1, 2);
+            var data = CreateDynamicDataWithHeterogeneousProperties(time, time, propertyOnlyInLastDataPoint);
+
+            dynamic dataFrame = converter.GetDataFrame(data);
+
+            using (Py.GIL())
+            {
+                var count = dataFrame.__len__().AsManagedObject(typeof(int));
+                Assert.AreEqual(2, count);
+
+                Assert.Multiple(() =>
+                {
+                    CollectionAssert.AreEqual(new[] { 1d, 2d }, dataFrame["value"].AsManagedObject(typeof(double[])));
+                    CollectionAssert.AreEqual(new[] { 10d, 20d }, dataFrame["factor_a"].AsManagedObject(typeof(double[])));
+
+                    // The data point without the property must not get the value of the one that has it,
+                    // even though both share the same index
+                    var factorB = (double[])dataFrame["factor_b"].AsManagedObject(typeof(double[]));
+                    var expectedFactorB = propertyOnlyInLastDataPoint ? new[] { double.NaN, 30d } : new[] { 30d, double.NaN };
+                    CollectionAssert.AreEqual(expectedFactorB, factorB);
+                });
+            }
+        }
+
+        [Test]
+        public void HandlesDynamicDataWithPropertyMissingInAMiddleDataPoint()
+        {
+            var converter = new PandasConverter();
+
+            // factor_a has a value at all 4 times, factor_b is missing at the 3rd one
+            var factorAValues = new[] { 10d, 20d, 30d, 40d };
+            var factorBValues = new double?[] { 100d, 200d, null, 400d };
+
+            var data = new List<CustomData>();
+            for (var i = 0; i < factorAValues.Length; i++)
+            {
+                var dataPoint = new CustomData { Symbol = Symbols.IBM, Time = new DateTime(2020, 1, 2).AddDays(i), Value = i + 1 };
+                dataPoint.SetProperty("factor_a", (decimal)factorAValues[i]);
+                if (factorBValues[i].HasValue)
+                {
+                    dataPoint.SetProperty("factor_b", (decimal)factorBValues[i].Value);
+                }
+                data.Add(dataPoint);
+            }
+
+            dynamic dataFrame = converter.GetDataFrame(data);
+
+            using (Py.GIL())
+            {
+                var count = dataFrame.__len__().AsManagedObject(typeof(int));
+                Assert.AreEqual(4, count);
+
+                Assert.Multiple(() =>
+                {
+                    var times = new DateTime[count];
+                    for (var i = 0; i < count; i++)
+                    {
+                        times[i] = (DateTime)dataFrame.index.get_level_values(1)[i].AsManagedObject(typeof(DateTime));
+                    }
+                    CollectionAssert.AreEqual(data.Select(x => x.EndTime), times);
+
+                    CollectionAssert.AreEqual(new[] { 1d, 2d, 3d, 4d }, dataFrame["value"].AsManagedObject(typeof(double[])));
+                    CollectionAssert.AreEqual(factorAValues, dataFrame["factor_a"].AsManagedObject(typeof(double[])));
+
+                    // the data point without the property gets a missing value in its row
+                    var factorB = (double[])dataFrame["factor_b"].AsManagedObject(typeof(double[]));
+                    CollectionAssert.AreEqual(new[] { 100d, 200d, double.NaN, 400d }, factorB);
+                });
+            }
+        }
+
+        [Test]
+        public void FlattensSingleSymbolBaseDataCollectionOfDynamicDataWithHeterogeneousProperties([Values] bool propertyOnlyInLastDataPoint)
+        {
+            var converter = new PandasConverter();
+            var data = new[]
+            {
+                new EnumerableData
+                {
+                    Data = CreateDynamicDataWithHeterogeneousProperties(new DateTime(2020, 1, 2), new DateTime(2020, 1, 3), propertyOnlyInLastDataPoint)
+                        .Cast<BaseData>().ToList(),
+                    Symbol = Symbols.IBM,
+                    Time = new DateTime(2020, 1, 1)
+                }
+            };
+
+            dynamic dataFrame = converter.GetDataFrame(data, flatten: true);
+
+            using (Py.GIL())
+            {
+                var count = dataFrame.__len__().AsManagedObject(typeof(int));
+                Assert.AreEqual(2, count);
+                AssertFlattenBaseDataCollectionDataFrameTimes(data, dataFrame);
+
+                Assert.Multiple(() =>
+                {
+                    CollectionAssert.AreEqual(new[] { 1d, 2d }, dataFrame["value"].AsManagedObject(typeof(double[])));
+                    CollectionAssert.AreEqual(new[] { 10d, 20d }, dataFrame["factor_a"].AsManagedObject(typeof(double[])));
+
+                    var factorB = (double[])dataFrame["factor_b"].AsManagedObject(typeof(double[]));
+                    var expectedFactorB = propertyOnlyInLastDataPoint ? new[] { double.NaN, 30d } : new[] { 30d, double.NaN };
+                    CollectionAssert.AreEqual(expectedFactorB, factorB);
+                });
+            }
+        }
+
+        /// <summary>
+        /// Two data points for the same symbol where only one of them has the "factor_b" property
+        /// </summary>
+        private static List<CustomData> CreateDynamicDataWithHeterogeneousProperties(DateTime firstTime, DateTime secondTime,
+            bool propertyOnlyInLastDataPoint)
+        {
+            var firstDataPoint = new CustomData { Symbol = Symbols.IBM, Time = firstTime, Value = 1m };
+            firstDataPoint.SetProperty("factor_a", 10m);
+
+            var secondDataPoint = new CustomData { Symbol = Symbols.IBM, Time = secondTime, Value = 2m };
+            secondDataPoint.SetProperty("factor_a", 20m);
+
+            (propertyOnlyInLastDataPoint ? secondDataPoint : firstDataPoint).SetProperty("factor_b", 30m);
+
+            return new List<CustomData> { firstDataPoint, secondDataPoint };
+        }
+
         private static void AssertFlattenBaseDataCollectionDataFrameTimes(EnumerableData[] data, dynamic dataFrame)
         {
             // For base data collections, the end time of each data point is added as a column
@@ -495,6 +741,119 @@ def Test4(dataFrame):
                 Assert.Throws<PythonException>(() => test2(dataFrame));
                 Assert.DoesNotThrow(() => test3(dataFrame));
                 Assert.DoesNotThrow(() => test4(dataFrame));
+            }
+        }
+
+        [TestCase("open")]
+        [TestCase("low")]
+        [TestCase("high")]
+        public void HistoryColumnLookupWorksWhenTickerMatchesColumn(string column)
+        {
+            var symbol = Symbols.SPY;
+            var rawBars = new[]
+            {
+                new TradeBar(new DateTime(2020, 1, 2, 9, 30, 0), symbol, 10m, 30m, 5m, 20m, 1000m),
+                new TradeBar(new DateTime(2020, 1, 2, 9, 31, 0), symbol, 11m, 31m, 6m, 21m, 1000m)
+            };
+            SymbolCache.Set("SPY", symbol);
+            var ticker = column.ToUpperInvariant();
+            var tickerSymbol = Symbol.Create(ticker, SecurityType.Equity, Market.USA);
+
+            using (Py.GIL())
+            {
+                using var dataFrame = (PyObject)_converter.GetDataFrame(GetHistory(symbol, Resolution.Minute, rawBars));
+                using var module = PyModule.FromString("testModule",
+                    @"
+import pandas as pd
+
+def lookups(data_frame, symbol, column):
+    time = data_frame.index.get_level_values('time')[1]
+    flat = data_frame.loc[symbol]
+    return [
+        data_frame.loc[symbol, column],
+        data_frame.loc['SPY', column],
+        data_frame.loc[(symbol, time), column],
+        data_frame.loc[(slice(None), time), column],
+        data_frame.loc[pd.IndexSlice[:, time], column],
+        data_frame.loc[lambda d: d['close'] > d['close'].mean(), column],
+        flat.loc[lambda d: d.close > 0, column]
+    ]
+
+def assert_lookups(data_frame, symbol, column, expected):
+    for actual, expected_value in zip(lookups(data_frame, symbol, column), expected):
+        assert type(actual) is type(expected_value), f'{type(actual)} != {type(expected_value)}'
+        assert actual.equals(expected_value) if hasattr(actual, 'equals') else actual == expected_value, f'{actual} != {expected_value}'
+
+def assert_ticker_keys_still_map(data_frame, column, ticker_symbol):
+    time = data_frame.index.get_level_values('time')[1]
+    ticker_rows = pd.DataFrame({column: [3.0], 'close': [4.0]}, index=pd.Index([ticker_symbol], name='symbol'))
+    assert ticker_rows.loc[column, column] == 3.0
+    ticker_history = pd.DataFrame({column: [1.0, 2.0]}, index=pd.MultiIndex.from_product([[ticker_symbol], data_frame.index.levels[1]]))
+    assert ticker_history.loc[(column, time), column] == 2.0
+    pairs = pd.DataFrame({column: [1.0, 2.0], 'close': [3.0, 4.0]}, index=pd.MultiIndex.from_tuples([('pair', ticker_symbol), ('pair', 'other')]))
+    assert pairs.loc(axis=0)['pair', column].tolist() == [1.0, 3.0]
+    assert pairs.loc['pair', column].tolist() == [1.0, 3.0]
+    ticker_column = pd.DataFrame({ticker_symbol: 1.0}, index=data_frame.index)
+    assert data_frame.loc[lambda d: ticker_column[column] > 0, column].equals(data_frame[column])
+
+def Test(data_frame, symbol, column, ticker_symbol, cache_ticker):
+    expected = lookups(data_frame, symbol, column)
+    cache_ticker()
+    assert_lookups(data_frame, symbol, column, expected)
+    assert_ticker_keys_still_map(data_frame, column, ticker_symbol)
+
+    data_frame[ticker_symbol] = 999.0
+    time = data_frame.index.get_level_values('time')[1]
+    flat = data_frame.loc[symbol].copy()
+    for frame, row in ((data_frame, (symbol, time)), (data_frame, ('SPY', time)), (flat, time)):
+        before = frame.loc[row, column]
+        total = frame.values.sum()
+        frame.loc[row, column] += 1
+        assert frame.loc[row, column] == before + 1
+        assert frame.values.sum() == total + 1");
+                using var test = module.GetAttr("Test");
+                using var pySymbol = symbol.ToPython();
+                using var pyColumn = new PyString(column);
+                using var pyTickerSymbol = tickerSymbol.ToPython();
+                using var cacheTicker = new Action(() => SymbolCache.Set(ticker, tickerSymbol)).ToPython();
+                using var result = test.Invoke(dataFrame, pySymbol, pyColumn, pyTickerSymbol, cacheTicker);
+            }
+            Assert.IsTrue(SymbolCache.TryGetSymbol(ticker, out _));
+        }
+
+        [TestCase("dataFrame['opne']", "'opne'")]
+        [TestCase("dataFrame.loc[symbol, 'opne']", "'opne'")]
+        [TestCase("dataFrame.loc[symbol].loc[[pd.Timestamp(1999, 1, 1)]]", "1999-01-01")]
+        public void KeyErrorIsNotRewrittenWhenNoKeyIsMapped(string lookup, string expectedInMessage)
+        {
+            var rawBars = Enumerable
+                .Range(0, 10)
+                .Select(i => new TradeBar(new DateTime(2020, 1, 2, 9, 30, 0).AddMinutes(i), Symbols.SPY, 10 + i, 30 + i, 5 + i, 20 + i, 1000 + i))
+                .ToArray();
+
+            SymbolCache.Set("SPY", Symbols.SPY);
+
+            using (Py.GIL())
+            {
+                // Declared inside the GIL so it is disposed before the GIL is released
+                using var dataFrame = (PyObject)_converter.GetDataFrame(GetHistory(Symbols.SPY, Resolution.Minute, rawBars));
+                using var module = PyModule.FromString("testModule",
+                    $@"
+import pandas as pd
+
+def Test(dataFrame, symbol):
+    try:
+        {lookup}
+    except KeyError as e:
+        return str(e)
+    return 'no error'");
+
+                using var pySymbol = Symbols.SPY.ToPython();
+                using var result = module.GetAttr("Test").Invoke(dataFrame, pySymbol);
+                var message = result.As<string>();
+
+                Assert.That(message, Does.Contain(expectedInMessage));
+                Assert.That(message, Does.Not.Contain("No key found for either mapped or original key"));
             }
         }
 
@@ -1506,9 +1865,9 @@ def indexDataFrameBySymbol(dataFrame, symbol):
                 var symbols = new List<Symbol> { Symbols.SPY, Symbols.AAPL, Symbols.GOOG };
                 var dataFrame = GetTestDataFrame(symbols);
 
-                var looupkSymbols = new List<Symbol> { Symbols.AAPL, Symbols.GOOG };
+                var lookupSymbols = new List<Symbol> { Symbols.AAPL, Symbols.GOOG };
                 dynamic indexedDataFrame = null;
-                Assert.DoesNotThrow(() => indexedDataFrame = indexDataFrameBySymbols(dataFrame, looupkSymbols));
+                Assert.DoesNotThrow(() => indexedDataFrame = indexDataFrameBySymbols(dataFrame, lookupSymbols));
                 Assert.IsNotNull(indexedDataFrame);
 
                 dynamic aaplDataFrame = null;
@@ -3369,7 +3728,7 @@ def Test(dataFrame, symbol):
             var converter = new PandasConverter();
             var tickType = TickType.OpenInterest;
             var dataType = LeanData.GetDataType(resolution, tickType);
-            var subcriptionDataConfig = new SubscriptionDataConfig(dataType, symbol, resolution,
+            var subscriptionDataConfig = new SubscriptionDataConfig(dataType, symbol, resolution,
                                                                    TimeZones.Chicago, TimeZones.Chicago,
                                                                    tickType: tickType, fillForward: false,
                                                                    extendedHours: true, isInternalFeed: true);
@@ -3377,7 +3736,7 @@ def Test(dataFrame, symbol):
             for (int i = 0; i < 10; i++)
             {
                 var line = $"{1000 * i},{11 * i}";
-                var openInterestTicks = new OpenInterest(subcriptionDataConfig, symbol, line, new DateTime(2017, 10, 10));
+                var openInterestTicks = new OpenInterest(subscriptionDataConfig, symbol, line, new DateTime(2017, 10, 10));
                 openinterest.Add(openInterestTicks);
             }
 

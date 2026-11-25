@@ -38,18 +38,19 @@ using QuantConnect.Data.Fundamental;
 using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Tests.Common.Data.Fundamental;
 using QuantConnect.Logging;
+using QuantConnect.Configuration;
 
 namespace QuantConnect.Tests.Algorithm
 {
-    [TestFixture, Parallelizable(ParallelScope.Fixtures)]
+    [TestFixture, Parallelizable(ParallelScope.Fixtures), FixtureLifeCycle(LifeCycle.InstancePerTestCase)]
     public class AlgorithmHistoryTests
     {
         private QCAlgorithm _algorithm;
         private TestHistoryProvider _testHistoryProvider;
-        private IDataProvider _dataProvider;
-        private IMapFileProvider _mapFileProvider;
-        private IDataCacheProvider _cacheProvider;
-        private IFactorFileProvider _factorFileProvider;
+        private static IDataProvider _dataProvider;
+        private static IMapFileProvider _mapFileProvider;
+        private static IDataCacheProvider _cacheProvider;
+        private static IFactorFileProvider _factorFileProvider;
 
         [SetUp]
         public void Setup()
@@ -60,13 +61,78 @@ namespace QuantConnect.Tests.Algorithm
         }
 
         [OneTimeSetUp]
-        public void OneTimeSetUp()
+        public static void OneTimeSetUp()
         {
             _dataProvider = TestGlobals.DataProvider;
             _mapFileProvider = TestGlobals.MapFileProvider;
             _factorFileProvider = TestGlobals.FactorFileProvider;
             _cacheProvider = TestGlobals.DataCacheProvider;
             FundamentalService.Initialize(_dataProvider, new NullFundamentalDataProvider(), false);
+        }
+
+        [TestCase(null)]
+        [TestCase(DataMappingMode.FirstDayMonth)]
+        public void HistoryWithExplicitUnavailableDataMappingModeFallsBackToMarketDefault(DataMappingMode? addedFutureDataMappingMode)
+        {
+            var symbol = Symbol.Create("FESX", SecurityType.Future, Market.EUREX);
+            if (addedFutureDataMappingMode.HasValue)
+            {
+                _algorithm.AddFuture("FESX", Resolution.Daily, Market.EUREX, dataMappingMode: addedFutureDataMappingMode);
+            }
+
+            _algorithm.History(symbol, 5, Resolution.Daily, dataMappingMode: DataMappingMode.OpenInterest).ToList();
+            _algorithm.History(symbol, _algorithm.Time.AddDays(-5), _algorithm.Time, Resolution.Daily, dataMappingMode: DataMappingMode.OpenInterest).ToList();
+
+            var requests = _testHistoryProvider.HistoryRequests.Where(x => x.Symbol == symbol).ToList();
+            Assert.Greater(requests.Count, 0);
+            // the market default is used, not the added future's mode
+            Assert.That(requests.Select(x => x.DataMappingMode), Has.All.EqualTo(DataMappingMode.LastTradingDay));
+            Assert.That(_algorithm.DebugMessages.Single(x => x.Contains("data mapping mode is not available")),
+                Does.EndWith("Warning: OpenInterest data mapping mode is not available for EUREX futures, using LastTradingDay instead."));
+        }
+
+        [Test]
+        public void HistoryWithoutDataMappingModeFallsBackForFutureNotAdded()
+        {
+            var symbol = Symbol.Create("FESX", SecurityType.Future, Market.EUREX);
+
+            _algorithm.History(symbol, 5, Resolution.Daily).ToList();
+
+            var requests = _testHistoryProvider.HistoryRequests.Where(x => x.Symbol == symbol).ToList();
+            Assert.Greater(requests.Count, 0);
+            Assert.That(requests.Select(x => x.DataMappingMode), Has.All.EqualTo(DataMappingMode.LastTradingDay));
+            Assert.That(_algorithm.DebugMessages.Single(x => x.Contains("data mapping mode is not available")),
+                Does.EndWith("Warning: OpenInterest data mapping mode is not available for EUREX futures, using LastTradingDay instead."));
+        }
+
+        [Test]
+        public void HistoryWithExplicitAvailableDataMappingModeKeepsIt()
+        {
+            var symbol = Symbol.Create("FESX", SecurityType.Future, Market.EUREX);
+
+            _algorithm.History(symbol, 5, Resolution.Daily, dataMappingMode: DataMappingMode.FirstDayMonth).ToList();
+
+            var requests = _testHistoryProvider.HistoryRequests.Where(x => x.Symbol == symbol).ToList();
+            Assert.Greater(requests.Count, 0);
+            Assert.That(requests.Select(x => x.DataMappingMode), Has.All.EqualTo(DataMappingMode.FirstDayMonth));
+            Assert.IsFalse(_algorithm.DebugMessages.Any(x => x.Contains("data mapping mode is not available")));
+        }
+
+        [Test]
+        public void HistoryWithExplicitUnavailableDataMappingModeDoesNotFallBackForContractsOrChains()
+        {
+            var symbol = Symbol.Create("FESX", SecurityType.Future, Market.EUREX);
+            var contract = Symbol.CreateFuture("FESX", Market.EUREX, new DateTime(2024, 6, 21));
+
+            _algorithm.History(contract, 5, Resolution.Daily, dataMappingMode: DataMappingMode.OpenInterest).ToList();
+            _algorithm.History<FutureUniverse>(symbol, 5, Resolution.Daily, dataMappingMode: DataMappingMode.OpenInterest).ToList();
+
+            var contractRequests = _testHistoryProvider.HistoryRequests.Where(x => x.Symbol == contract).ToList();
+            var chainRequests = _testHistoryProvider.HistoryRequests.Where(x => x.DataType == typeof(FutureUniverse)).ToList();
+            Assert.Greater(contractRequests.Count, 0);
+            Assert.Greater(chainRequests.Count, 0);
+            Assert.That(contractRequests.Concat(chainRequests).Select(x => x.DataMappingMode), Has.All.EqualTo(DataMappingMode.OpenInterest));
+            Assert.IsFalse(_algorithm.DebugMessages.Any(x => x.Contains("data mapping mode is not available")));
         }
 
         [TestCase(Language.Python)]
@@ -550,14 +616,14 @@ def getTickHistory(algorithm, symbol, start, end):
             }
 
             var expectedCount = resolution == Resolution.Hour || resolution == Resolution.Daily ? 1 : 2;
-            Assert.AreEqual(expectedCount, _testHistoryProvider.HistryRequests.Count);
-            Assert.AreEqual(symbol, _testHistoryProvider.HistryRequests.First().Symbol);
-            Assert.AreEqual(resolution, _testHistoryProvider.HistryRequests.First().Resolution);
-            Assert.IsFalse(_testHistoryProvider.HistryRequests.First().IncludeExtendedMarketHours);
-            Assert.IsFalse(_testHistoryProvider.HistryRequests.First().IsCustomData);
-            Assert.AreEqual(fillForwardResolution, _testHistoryProvider.HistryRequests.First().FillForwardResolution);
-            Assert.AreEqual(DataNormalizationMode.Adjusted, _testHistoryProvider.HistryRequests.First().DataNormalizationMode);
-            Assert.AreEqual(expectedCount == 1 ? TickType.Trade : TickType.Quote, _testHistoryProvider.HistryRequests.First().TickType);
+            Assert.AreEqual(expectedCount, _testHistoryProvider.HistoryRequests.Count);
+            Assert.AreEqual(symbol, _testHistoryProvider.HistoryRequests.First().Symbol);
+            Assert.AreEqual(resolution, _testHistoryProvider.HistoryRequests.First().Resolution);
+            Assert.IsFalse(_testHistoryProvider.HistoryRequests.First().IncludeExtendedMarketHours);
+            Assert.IsFalse(_testHistoryProvider.HistoryRequests.First().IsCustomData);
+            Assert.AreEqual(fillForwardResolution, _testHistoryProvider.HistoryRequests.First().FillForwardResolution);
+            Assert.AreEqual(DataNormalizationMode.Adjusted, _testHistoryProvider.HistoryRequests.First().DataNormalizationMode);
+            Assert.AreEqual(expectedCount == 1 ? TickType.Trade : TickType.Quote, _testHistoryProvider.HistoryRequests.First().TickType);
         }
 
         private static IEnumerable<TestCaseData> BarCountHistoryRequestTestCases
@@ -667,8 +733,8 @@ def getTickHistory(algorithm, symbol, start, end):
             if (symbol.SecurityType == SecurityType.Equity)
             {
                 var expectedCount = resolution == Resolution.Hour || resolution == Resolution.Daily ? 1 : 2;
-                Assert.AreEqual(expectedCount, _testHistoryProvider.HistryRequests.Count);
-                var request = _testHistoryProvider.HistryRequests.First();
+                Assert.AreEqual(expectedCount, _testHistoryProvider.HistoryRequests.Count);
+                var request = _testHistoryProvider.HistoryRequests.First();
                 Assert.AreEqual(symbol, request.Symbol);
                 Assert.AreEqual(resolution, request.Resolution);
                 Assert.IsFalse(request.IncludeExtendedMarketHours);
@@ -680,8 +746,8 @@ def getTickHistory(algorithm, symbol, start, end):
             }
             else if (symbol.SecurityType == SecurityType.IndexOption)
             {
-                Assert.AreEqual(1, _testHistoryProvider.HistryRequests.Count);
-                var request = _testHistoryProvider.HistryRequests.Single();
+                Assert.AreEqual(1, _testHistoryProvider.HistoryRequests.Count);
+                var request = _testHistoryProvider.HistoryRequests.Single();
                 Assert.AreEqual(symbol, request.Symbol);
                 Assert.AreEqual(resolution ?? defaultResolution, request.Resolution);
                 Assert.AreEqual(typeof(OptionUniverse), request.DataType);
@@ -721,14 +787,14 @@ def getTickHistory(algorithm, symbol, start, end):
                 }
             }
 
-            Assert.AreEqual(2, _testHistoryProvider.HistryRequests.Count);
-            Assert.AreEqual(symbol, _testHistoryProvider.HistryRequests.First().Symbol);
-            Assert.AreEqual(Resolution.Tick, _testHistoryProvider.HistryRequests.First().Resolution);
-            Assert.IsFalse(_testHistoryProvider.HistryRequests.First().IncludeExtendedMarketHours);
-            Assert.IsFalse(_testHistoryProvider.HistryRequests.First().IsCustomData);
-            Assert.AreEqual(null, _testHistoryProvider.HistryRequests.First().FillForwardResolution);
-            Assert.AreEqual(DataNormalizationMode.Adjusted, _testHistoryProvider.HistryRequests.First().DataNormalizationMode);
-            Assert.AreEqual(TickType.Quote, _testHistoryProvider.HistryRequests.First().TickType);
+            Assert.AreEqual(2, _testHistoryProvider.HistoryRequests.Count);
+            Assert.AreEqual(symbol, _testHistoryProvider.HistoryRequests.First().Symbol);
+            Assert.AreEqual(Resolution.Tick, _testHistoryProvider.HistoryRequests.First().Resolution);
+            Assert.IsFalse(_testHistoryProvider.HistoryRequests.First().IncludeExtendedMarketHours);
+            Assert.IsFalse(_testHistoryProvider.HistoryRequests.First().IsCustomData);
+            Assert.AreEqual(null, _testHistoryProvider.HistoryRequests.First().FillForwardResolution);
+            Assert.AreEqual(DataNormalizationMode.Adjusted, _testHistoryProvider.HistoryRequests.First().DataNormalizationMode);
+            Assert.AreEqual(TickType.Quote, _testHistoryProvider.HistoryRequests.First().TickType);
         }
 
         [Test]
@@ -1562,7 +1628,7 @@ def getTimeSpanHistory(algorithm: QCAlgorithm, symbol: Union[Symbol, List[Symbol
                 }
             }
 
-            Assert.That(_testHistoryProvider.HistryRequests, Has.All.Property("IsCustomData").True);
+            Assert.That(_testHistoryProvider.HistoryRequests, Has.All.Property("IsCustomData").True);
         }
 
         [Test]
@@ -1621,7 +1687,7 @@ def getTimeSpanHistory(algorithm: QCAlgorithm, symbol: Union[Symbol, List[Symbol
                 }
             }
 
-            Assert.That(_testHistoryProvider.HistryRequests, Has.All.Property("IsCustomData").True);
+            Assert.That(_testHistoryProvider.HistoryRequests, Has.All.Property("IsCustomData").True);
         }
 
         [Test]
@@ -1894,6 +1960,7 @@ def getOpenInterestHistory(algorithm, symbol, start, end):
             }
         }
 
+        [Parallelizable(ParallelScope.All)]
         // C#
         [TestCase(Language.CSharp, Resolution.Second, true, 23400, 23400, 23400)]
         [TestCase(Language.CSharp, Resolution.Second, false, 23400, 22884, 16093)]
@@ -1907,7 +1974,7 @@ def getOpenInterestHistory(algorithm, symbol, start, end):
         public void HistoryRequestWithFillForward(Language language, Resolution resolution, bool fillForward, int periods,
             int expectedHistoryCount, int expectedTradeBarOnlyHistoryCount)
         {
-            // Theres data only for 2013-10-07 to 2013-10-11 for SPY. Data should be fill forwarded till the 15th.
+            // There's data only for 2013-10-07 to 2013-10-11 for SPY. Data should be fill forwarded till the 15th.
             var start = new DateTime(2013, 10, 11);
             var end = resolution == Resolution.Minute ? new DateTime(2013, 10, 15) : new DateTime(2013, 10, 12);
             var timeSpan = end - start;
@@ -2276,6 +2343,7 @@ tradeBar = TradeBar
             }
         }
 
+        [Parallelizable(ParallelScope.All)]
         // C#
         [TestCase(Language.CSharp, true, 4023, 800)] // 4023, 800
         [TestCase(Language.CSharp, false, 2056, 437)] // 2056, 437
@@ -2457,6 +2525,7 @@ tick = Tick
             }
         }
 
+        [Parallelizable(ParallelScope.All)]
         // C#
         [TestCase(Language.CSharp, Resolution.Daily, 51)]
         [TestCase(Language.CSharp, Resolution.Hour, 400)]
@@ -2958,6 +3027,7 @@ tradeBar = TradeBar
             }
         }
 
+        [Parallelizable(ParallelScope.All)]
         // C#
         [TestCase(Language.CSharp, Resolution.Daily, 61)]
         [TestCase(Language.CSharp, Resolution.Hour, 477)]
@@ -2966,7 +3036,7 @@ tradeBar = TradeBar
         [TestCase(Language.Python, Resolution.Daily, 61)]
         [TestCase(Language.Python, Resolution.Hour, 477)]
         [TestCase(Language.Python, Resolution.Minute, 26670)]
-        public void HistoryRequestWithContracDepthOffsets(Language language, Resolution resolution, int expectedHistoryCount)
+        public void HistoryRequestWithContractDepthOffsets(Language language, Resolution resolution, int expectedHistoryCount)
         {
             var start = new DateTime(2013, 10, 07);
             var end = new DateTime(2014, 1, 1);
@@ -3233,6 +3303,50 @@ tradeBar = TradeBar
             var requestStart = historyRequestFactory.GetStartTimeAlgoTz(aapl.Symbol, requestPeriods, resolution, exchangeHours,
                 config.DataTimeZone, config.Type, extendedMarketHours: requestWithExtendedMarket);
             Assert.AreEqual(marketOpen, requestStart);
+        }
+
+        // This reproduces https://github.com/QuantConnect/Lean/issues/9784
+        // HKFE trades 09:15-12:00 and 13:00-16:30 Hong Kong time, algorithm time zone is New York (13 hours behind in winter)
+        // 00:00 New York is 13:00 Hong Kong, inside the afternoon session: today does not count
+        [TestCase(Language.CSharp, "2018-02-01 00:00:00", "2018-01-18 00:00:00")]
+        [TestCase(Language.Python, "2018-02-01 00:00:00", "2018-01-18 00:00:00")]
+        // 04:00 New York is 17:00 Hong Kong, after the last close: today counts
+        [TestCase(Language.CSharp, "2018-02-01 04:00:00", "2018-01-18 17:00:00")]
+        [TestCase(Language.Python, "2018-02-01 04:00:00", "2018-01-18 17:00:00")]
+        public void DailyHistoryBarCountOnMarketsWithLunchBreak(Language language, string algorithmTime, string expectedStartExchangeTime)
+        {
+            var algorithm = GetAlgorithm(DateTime.ParseExact(algorithmTime, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+            algorithm.Settings.DailyPreciseEndTime = true;
+            algorithm.Settings.SeedInitialPrices = false;
+            algorithm.HistoryProvider = _testHistoryProvider;
+            var hsi = algorithm.AddFuture("HSI", Resolution.Daily, Market.HKFE);
+
+            if (language == Language.CSharp)
+            {
+                algorithm.History(hsi.Symbol, 10, Resolution.Daily).ToList();
+            }
+            else
+            {
+                using (Py.GIL())
+                {
+                    using var module = PyModule.FromString("testModule", @"
+from AlgorithmImports import *
+
+def get_history(algorithm, symbol):
+    return algorithm.history(symbol, 10, Resolution.DAILY)
+");
+                    algorithm.SetPandasConverter();
+                    using var getHistory = module.GetAttr("get_history");
+                    using var result = getHistory.Invoke(algorithm.ToPython(), hsi.Symbol.ToPython());
+                }
+            }
+
+            var expectedStart = DateTime.ParseExact(expectedStartExchangeTime, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+                .ConvertToUtc(hsi.Exchange.TimeZone);
+            var request = _testHistoryProvider.HistoryRequests.Single(x => x.DataType == typeof(TradeBar));
+            Assert.AreEqual(expectedStart, request.StartTimeUtc);
+            Assert.AreEqual(algorithm.UtcTime, request.EndTimeUtc);
+            Assert.AreEqual(Resolution.Daily, request.Resolution);
         }
 
         // This reproduces https://github.com/QuantConnect/Lean/issues/7504
@@ -3810,6 +3924,7 @@ def get_history(algorithm, security):
             }
         }
 
+        [Parallelizable(ParallelScope.All)]
         [TestCase(true, Resolution.Tick, true)]
         [TestCase(true, Resolution.Second, true)]
         [TestCase(true, Resolution.Minute, true)]
@@ -3940,7 +4055,7 @@ def get_history(algorithm, symbol):
         }
 
         [TestCaseSource(nameof(GetHistoryRequestFromNonTradableDateTestCases))]
-        public void GetsRightSliceCountForDailyPeriodHisotryRequestFromNonTradableDate(DateTime dateTime)
+        public void GetsRightSliceCountForDailyPeriodHistoryRequestFromNonTradableDate(DateTime dateTime)
         {
             var algorithm = GetAlgorithm(dateTime);
             Assert.AreEqual(dateTime, algorithm.Time);
@@ -4217,21 +4332,21 @@ def get_history(algorithm, symbol):
             {
                 using var pyDate = date.ToPython();
                 var constituents = (List<T>)df.loc[pyDate].As<List<T>>();
-                var flattendDfConstituents = flattenedDf.loc[pyDate];
+                var flattenedDfConstituents = flattenedDf.loc[pyDate];
 
                 CollectionAssert.IsNotEmpty(constituents);
-                Assert.AreEqual(flattendDfConstituents.shape[0].As<int>(), constituents.Count);
+                Assert.AreEqual(flattenedDfConstituents.shape[0].As<int>(), constituents.Count);
 
                 var constituentsSymbols = constituents.Select(x => x.Symbol).ToList();
-                var flattendDfConstituentsSymbols = ((List<Symbol>)flattendDfConstituents.index.to_list().As<List<Symbol>>()).ToList();
-                CollectionAssert.AreEqual(flattendDfConstituentsSymbols, constituentsSymbols);
+                var flattenedDfConstituentsSymbols = ((List<Symbol>)flattenedDfConstituents.index.to_list().As<List<Symbol>>()).ToList();
+                CollectionAssert.AreEqual(flattenedDfConstituentsSymbols, constituentsSymbols);
 
                 var constituentsWeights = constituents.Select(x => getWeight(x)).ToList();
-                var flattendDfConstituentsWeights = constituentsSymbols
-                    .Select(symbol => flattendDfConstituents.loc[symbol.ToPython()]["weight"].As<decimal>())
+                var flattenedDfConstituentsWeights = constituentsSymbols
+                    .Select(symbol => flattenedDfConstituents.loc[symbol.ToPython()]["weight"].As<decimal>())
                     .Cast<decimal>()
                     .ToList();
-                CollectionAssert.AreEqual(flattendDfConstituentsWeights, constituentsWeights);
+                CollectionAssert.AreEqual(flattenedDfConstituentsWeights, constituentsWeights);
             }
 
             Log.Debug((string)df.to_string());
@@ -4287,6 +4402,100 @@ def get_history(algorithm, symbol):
             }).ToArray();
         }
 
+        [Test]
+        public void WarnsOnLargeHistoryRequest()
+        {
+            Config.Set("history-request-cells-warning-threshold", "1000");
+            try
+            {
+                var algorithm = CreateAlgorithmForHistoryWarningTests();
+                var symbol = algorithm.AddEquity("SPY", Resolution.Daily).Symbol;
+
+                // ~365 daily bars x 5 columns > 1000 cells
+                algorithm.History(new[] { symbol }, 365, Resolution.Daily);
+
+                Assert.AreEqual(1, algorithm.DebugMessages.Count(x => x.Contains("large history request")));
+
+                // the warning is only sent once per algorithm
+                algorithm.History(new[] { symbol }, 365, Resolution.Daily);
+                Assert.AreEqual(1, algorithm.DebugMessages.Count(x => x.Contains("large history request")));
+            }
+            finally
+            {
+                Config.Reset();
+            }
+        }
+
+        [Test]
+        public void WarnsOnLargeTickHistoryRequest()
+        {
+            Config.Set("history-request-cells-warning-threshold", "1000000");
+            try
+            {
+                var algorithm = CreateAlgorithmForHistoryWarningTests();
+                var symbol = algorithm.AddEquity("SPY", Resolution.Tick).Symbol;
+
+                // one market day estimated at 10 ticks per second: 234,000 bars x 5 columns > 1,000,000 cells.
+                // At 1 tick per second the estimate would stay under the threshold and miss the warning
+                algorithm.History(new[] { symbol }, TimeSpan.FromDays(1), Resolution.Tick);
+
+                Assert.AreEqual(1, algorithm.DebugMessages.Count(x => x.Contains("large history request")));
+            }
+            finally
+            {
+                Config.Reset();
+            }
+        }
+
+        [Test]
+        public void DoesNotWarnOnSmallHistoryRequest()
+        {
+            // default threshold
+            var algorithm = CreateAlgorithmForHistoryWarningTests();
+            var symbol = algorithm.AddEquity("SPY", Resolution.Daily).Symbol;
+
+            algorithm.History(new[] { symbol }, 30, Resolution.Daily);
+
+            Assert.AreEqual(0, algorithm.DebugMessages.Count(x => x.Contains("large history request")));
+        }
+
+        [Test]
+        public void WarnsOnRepeatedOverlappingHistoryRequests()
+        {
+            // the "large call" floor tracked for overlap detection is threshold / 50 = 2000 cells
+            Config.Set("history-request-cells-warning-threshold", "100000");
+            try
+            {
+                var algorithm = CreateAlgorithmForHistoryWarningTests();
+                var symbol = algorithm.AddEquity("SPY", Resolution.Daily).Symbol;
+
+                for (var i = 0; i < 40; i++)
+                {
+                    // ~800 daily bars x 5 columns = ~4000 cells: over the large-call floor, under the size warning threshold
+                    algorithm.History(new[] { symbol }, 800, Resolution.Daily);
+                }
+
+                Assert.AreEqual(0, algorithm.DebugMessages.Count(x => x.Contains("large history request")));
+                Assert.AreEqual(1, algorithm.DebugMessages.Count(x => x.Contains("overlapping")));
+            }
+            finally
+            {
+                Config.Reset();
+            }
+        }
+
+        private static QCAlgorithm CreateAlgorithmForHistoryWarningTests()
+        {
+            // the warning thresholds are read from the config when the algorithm is created,
+            // so we create a dedicated instance instead of using the fixture's algorithm
+            var algorithm = new QCAlgorithm();
+            algorithm.SubscriptionManager.SetDataManager(new DataManagerStub(algorithm));
+            algorithm.HistoryProvider = new TestHistoryProvider();
+            algorithm.SetStartDate(2013, 10, 07);
+            algorithm.Settings.SeedInitialPrices = false;
+            return algorithm;
+        }
+
         private QCAlgorithm GetAlgorithm(DateTime dateTime)
         {
             var algorithm = new QCAlgorithm();
@@ -4318,7 +4527,7 @@ def get_history(algorithm, symbol):
         private class TestHistoryProvider : HistoryProviderBase
         {
             public override int DataPointCount { get; }
-            public List<HistoryRequest> HistryRequests { get; } = new List<HistoryRequest>();
+            public List<HistoryRequest> HistoryRequests { get; } = new List<HistoryRequest>();
 
             public List<Slice> Slices { get; set; } = new List<Slice>();
 
@@ -4331,7 +4540,7 @@ def get_history(algorithm, symbol):
             {
                 foreach (var request in requests)
                 {
-                    HistryRequests.Add(request);
+                    HistoryRequests.Add(request);
                 }
 
                 if (!requests.Any()) return Enumerable.Empty<Slice>().ToList();

@@ -66,7 +66,7 @@ namespace QuantConnect.Algorithm.CSharp
             _interestPerSymbol[_btcUsd.Symbol] = 0;
             _interestPerSymbol[_adaUsdt.Symbol] = 0;
 
-            // Default USD cash, set 1M but it wont be used
+            // Default USD cash, set 1M but it won't be used
             SetCash(1000000);
 
             // the amount of BTC we need to hold to trade 'BTCUSD'
@@ -254,7 +254,7 @@ namespace QuantConnect.Algorithm.CSharp
             {"Drawdown", "0%"},
             {"Expectancy", "0"},
             {"Start Equity", "1000200.00"},
-            {"End Equity", "1000278.02"},
+            {"End Equity", "1000272.75"},
             {"Net Profit", "0%"},
             {"Sharpe Ratio", "0"},
             {"Sortino Ratio", "0"},

@@ -101,6 +101,9 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                 var frontierUtc = _timeProvider.GetUtcNow();
                 _frontierTimeProvider.SetCurrentTimeUtc(frontierUtc);
 
+                // delisted securities have no data nor universe selection to trigger their pending removal
+                _universeSelection.CheckPendingDelistedRemovals(frontierUtc);
+
                 SecurityChanges newChanges;
                 do
                 {
@@ -177,7 +180,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                             else
                             {
                                 // assume that if the first item is a base data collection then the enumerator handled the aggregation,
-                                // otherwise, load all the the data into a new collection instance
+                                // otherwise, load all the data into a new collection instance
                                 var packetBaseDataCollection = packet.Data[0] as BaseDataCollection;
                                 var packetData = packetBaseDataCollection == null
                                     ? packet.Data
@@ -228,8 +231,8 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                         // time pulse to align algorithm time with current frontier
                         yield return _timeSliceFactory.CreateTimePulse(frontierUtc);
 
-                        // trigger the smalled resolution first, so that FF res get's set once from the start correctly
-                        // while at it, let's make it determininstic and sort by universe sid later
+                        // trigger the smallest resolution first, so that FF res gets set once from the start correctly
+                        // while at it, let's make it deterministic and sort by universe sid later
                         foreach (var kvp in universeData.OrderBy(x => x.Key.Configuration.Resolution).ThenBy(x => x.Key.Symbol.ID))
                         {
                             var universe = kvp.Key;

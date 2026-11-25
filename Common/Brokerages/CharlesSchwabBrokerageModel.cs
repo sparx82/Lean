@@ -38,6 +38,15 @@ namespace QuantConnect.Brokerages
             });
 
         /// <summary>
+        /// The contingency types supported by the brokerage: OCO and TRIGGER order strategies
+        /// </summary>
+        private readonly HashSet<ContingencyType> _supportedContingencyTypes = new()
+        {
+            ContingencyType.OneCancelsOther,
+            ContingencyType.OneTriggersOther
+        };
+
+        /// <summary>
         /// HashSet containing the order types supported by the <see cref="CanSubmitOrder"/> operation in TradeStation.
         /// </summary>
         private readonly HashSet<OrderType> _supportOrderTypes =
@@ -84,8 +93,6 @@ namespace QuantConnect.Brokerages
         /// <returns>True if the brokerage could process the order, false otherwise</returns>
         public override bool CanSubmitOrder(Security security, Order order, out BrokerageMessageEvent message)
         {
-            message = default;
-
             if (!_supportSecurityTypes.Contains(security.Type))
             {
                 message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
@@ -100,7 +107,33 @@ namespace QuantConnect.Brokerages
                 return false;
             }
 
+            // OCO and TRIGGER order strategies, which can be nested
+            if (!this.ValidateContingentOrder(order, _supportedContingencyTypes, out message, supportsComboOrders: false))
+            {
+                return false;
+            }
+
             return base.CanSubmitOrder(security, order, out message);
+        }
+
+        /// <summary>
+        /// Returns true if the brokerage would allow updating the order as specified by the request
+        /// </summary>
+        /// <param name="security">The security of the order</param>
+        /// <param name="order">The order to be updated</param>
+        /// <param name="request">The requested update to be made to the order</param>
+        /// <param name="message">If this function returns false, a brokerage message detailing why the order may not be updated</param>
+        /// <returns>True if the brokerage would allow updating the order, false otherwise</returns>
+        public override bool CanUpdateOrder(Security security, Order order, UpdateOrderRequest request, out BrokerageMessageEvent message)
+        {
+            if (order.Contingency != null)
+            {
+                // OCO and TRIGGER order strategies can only be replaced as a whole
+                message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
+                    Messages.DefaultBrokerageModel.UnsupportedContingentOrdersUpdate(this));
+                return false;
+            }
+            return base.CanUpdateOrder(security, order, request, out message);
         }
     }
 }

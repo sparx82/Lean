@@ -119,6 +119,13 @@ namespace QuantConnect.Algorithm.Framework.Execution
         {
             foreach (var added in changes.AddedSecurities)
             {
+                if (_symbolData.TryGetValue(added.Symbol, out var data)
+                    && !IsConsolidatorReceivingData(algorithm, added.Symbol, data.Consolidator))
+                {
+                    _symbolData.Remove(added.Symbol);
+                    algorithm.SubscriptionManager.RemoveConsolidator(added.Symbol, data.Consolidator);
+                }
+
                 // initialize new securities
                 if (!_symbolData.ContainsKey(added.Symbol))
                 {

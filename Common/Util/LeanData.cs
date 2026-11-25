@@ -1192,11 +1192,11 @@ namespace QuantConnect.Util
                             {
                                 Log.Debug($"LeanData.TryParsePath(): Failed to parse '{fileName}' unexpected Resolution");
                             }
-                            // only acept a failure to parse resolution if we are facing a universes path
+                            // only accept a failure to parse resolution if we are facing a universes path
                             return false;
                         }
 
-                        (symbol, date) = ParseUniversePath(info, securityType);
+                        (symbol, date) = ParseUniversePath(info, securityType, info[startIndex + 1]);
                         return true;
                     }
                 }
@@ -1279,10 +1279,11 @@ namespace QuantConnect.Util
         /// </list>
         /// </param>
         /// <param name="securityType">The type of security for which the symbol is being created.</param>
+        /// <param name="market">The market for which the symbol is being created.</param>
         /// <returns>A tuple containing the parsed <see cref="Symbol"/> and the universe processing file date.</returns>
         /// <exception cref="ArgumentException">Thrown if the file path does not contain 'universes'.</exception>
         /// <exception cref="NotSupportedException">Thrown if the security type is not supported.</exception>
-        private static (Symbol symbol, DateTime processingDate) ParseUniversePath(IReadOnlyList<string> filePathParts, SecurityType securityType)
+        private static (Symbol symbol, DateTime processingDate) ParseUniversePath(IReadOnlyList<string> filePathParts, SecurityType securityType, string market)
         {
             if (!filePathParts.Contains("universes", StringComparer.InvariantCultureIgnoreCase))
             {
@@ -1290,7 +1291,6 @@ namespace QuantConnect.Util
             }
 
             var symbol = default(Symbol);
-            var market = filePathParts[2];
             var ticker = filePathParts[^2];
             var universeFileDate = DateTime.ParseExact(filePathParts[^1], DateFormat.EightCharacter, DateTimeFormatInfo.InvariantInfo, DateTimeStyles.None);
             switch (securityType)
@@ -1540,7 +1540,7 @@ namespace QuantConnect.Util
         /// Helper method to determine if we should use strict end time
         /// </summary>
         /// <param name="symbol">The associated symbol</param>
-        /// <param name="increment">The datas time increment</param>
+        /// <param name="increment">The data's time increment</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool UseStrictEndTime(bool dailyStrictEndTimeEnabled, Symbol symbol, TimeSpan increment, SecurityExchangeHours exchangeHours)
         {
@@ -1589,7 +1589,7 @@ namespace QuantConnect.Util
         }
 
         /// <summary>
-        /// Helper method that if appropiate, will set the Time and EndTime of the given data point to it's daily strict times
+        /// Helper method that if appropriate, will set the Time and EndTime of the given data point to it's daily strict times
         /// </summary>
         /// <param name="baseData">The target data point</param>
         /// <param name="exchange">The associated exchange hours</param>

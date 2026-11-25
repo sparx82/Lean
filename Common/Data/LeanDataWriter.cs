@@ -62,7 +62,7 @@ namespace QuantConnect.Data
         /// <param name="tickType">The tick type</param>
         /// <param name="dataCacheProvider">The data cache provider to use</param>
         /// <param name="writePolicy">The file write policy to use</param>
-        /// <param name="mapSymbol">True if the symbol should be mapped while writting the data</param>
+        /// <param name="mapSymbol">True if the symbol should be mapped while writing the data</param>
         public LeanDataWriter(Resolution resolution, Symbol symbol, string dataDirectory, TickType tickType = TickType.Trade,
             IDataCacheProvider dataCacheProvider = null, WritePolicy? writePolicy = null, bool mapSymbol = false) : this(
             dataDirectory,
@@ -311,7 +311,7 @@ namespace QuantConnect.Data
             }
 
             // because we read & write the same file we need to take a lock per file path so we don't read something that might get outdated
-            // by someone writting to the same path at the same time
+            // by someone writing to the same path at the same time
             _keySynchronizer.Execute(filePath, singleExecution: false, () =>
             {
                 var date = data[0].Time.Date;
@@ -329,7 +329,7 @@ namespace QuantConnect.Data
 
                 // Handle merging of files
                 // Only merge on files with hour/daily resolution, that exist, and can be loaded
-                string finalData = null;
+                byte[] finalData = null;
                 if (_writePolicy == WritePolicy.Append)
                 {
                     var streamWriter = new ZipStreamWriter(filePath, entryName);
@@ -341,25 +341,24 @@ namespace QuantConnect.Data
                 }
                 else if (_writePolicy == WritePolicy.Merge && fileExists && TryLoadFile(filePath, entryName, date, out var rows))
                 {
-                    // Preform merge on loaded rows
+                    // Perform merge on loaded rows
                     foreach (var timedLine in data)
                     {
                         rows[timedLine.Time] = timedLine.Line;
                     }
 
                     // Final merged data product
-                    finalData = string.Join("\n", rows.Values);
+                    finalData = JoinLines(rows.Values);
                 }
                 else
                 {
                     // Otherwise just extract the data from the given list.
-                    finalData = string.Join("\n", data.Select(x => x.Line));
+                    finalData = JoinLines(data.Select(x => x.Line));
                 }
 
                 if (finalData != null)
                 {
-                    var bytes = Encoding.UTF8.GetBytes(finalData);
-                    _dataCacheProvider.Store($"{filePath}#{entryName}", bytes);
+                    _dataCacheProvider.Store($"{filePath}#{entryName}", finalData);
                 }
 
                 if (Log.DebuggingEnabled)
@@ -369,6 +368,31 @@ namespace QuantConnect.Data
                     Log.Debug($"LeanDataWriter.Write({symbol.ID}): Appended: {filePath} @ {entryName} {from}->{to}");
                 }
             });
+        }
+
+        /// <summary>
+        /// Encodes the lines as UTF8, separated by a new line, straight into a byte array: a day of ticks
+        /// can exceed the maximum length of a string, which joining them first would need
+        /// </summary>
+        private static byte[] JoinLines(IEnumerable<string> lines)
+        {
+            var byteCount = 0L;
+            foreach (var line in lines)
+            {
+                byteCount += Encoding.UTF8.GetByteCount(line) + 1;
+            }
+
+            var bytes = new byte[Math.Max(byteCount - 1, 0)];
+            var offset = 0;
+            foreach (var line in lines)
+            {
+                if (offset > 0)
+                {
+                    bytes[offset - 1] = (byte)'\n';
+                }
+                offset += Encoding.UTF8.GetBytes(line, 0, line.Length, bytes, offset) + 1;
+            }
+            return bytes;
         }
 
         /// <summary>

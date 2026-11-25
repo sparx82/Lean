@@ -20,7 +20,6 @@ using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using System.Collections.Generic;
 using QuantConnect.Securities.Option.StrategyMatcher;
-using QuantConnect.Securities.Option;
 
 namespace QuantConnect.Algorithm.CSharp
 {
@@ -63,20 +62,18 @@ namespace QuantConnect.Algorithm.CSharp
 
                     AssertOptionStrategyIsPresent(OptionStrategyDefinitions.BullCallLadder.Name, 5);
 
-                    var callSecurity = (Option)Securities[highStrikeCall.Symbol];
-                    var undPrice = chain.Underlying.Price;
                     var expectedMarginUsage = 80899m;
 
                     if (expectedMarginUsage != Portfolio.TotalMarginUsed)
                     {
-                        throw new Exception($"Unexpect margin used!:{Portfolio.TotalMarginUsed}");
+                        throw new Exception($"Unexpected margin used!:{Portfolio.TotalMarginUsed}");
                     }
 
-                    // we payed the ask and value using the assets price
+                    // we paid the ask and value using the assets price
                     var priceLadderDifference = GetPriceSpreadDifference(lowStrikeCall.Symbol, midStrikeCall.Symbol, highStrikeCall.Symbol);
                     if (initialMargin != (freeMarginPostTrade + expectedMarginUsage + _paidFees - priceLadderDifference))
                     {
-                        throw new Exception("Unexpect margin remaining!");
+                        throw new Exception("Unexpected margin remaining!");
                     }
                 }
             }

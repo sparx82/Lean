@@ -46,6 +46,12 @@ namespace QuantConnect.Indicators
         public int WarmUpPeriod { get; set; }
 
         /// <summary>
+        /// The time zone of this indicator's values, so that the values of assets of different exchange time zones share
+        /// one clock: the exchange time zone of the first symbol given at construction
+        /// </summary>
+        protected DateTimeZone TimeZone { get; }
+
+        /// <summary>
         /// Gets a flag indicating when this indicator is ready and fully initialized
         /// </summary>
         public override bool IsReady => DataBySymbol.Values.All(data => data.DataPoints.IsReady);
@@ -66,6 +72,7 @@ namespace QuantConnect.Indicators
             DataBySymbol = symbols.ToDictionary(symbol => symbol, symbol => new SymbolData(symbol, period));
             var isTimezoneDifferent = DataBySymbol.Values.Select(data => data.ExchangeTimeZone).Distinct().Count() > 1;
             WarmUpPeriod = period + (isTimezoneDifferent ? 1 : 0);
+            TimeZone = DataBySymbol.Values.FirstOrDefault()?.ExchangeTimeZone;
         }
 
         /// <summary>
@@ -105,6 +112,22 @@ namespace QuantConnect.Indicators
         }
 
         /// <summary>
+        /// Gets the end time of the value this indicator computes from the given input, in <see cref="TimeZone"/>.
+        /// The input of a symbol this indicator no longer tracks keeps its end time
+        /// </summary>
+        /// <param name="input">The input given to the indicator</param>
+        /// <returns>The end time of the indicator's value</returns>
+        protected override DateTime GetValueEndTime(TInput input)
+        {
+            if (TimeZone == null || !DataBySymbol.TryGetValue(input.Symbol, out var symbolData)
+                || symbolData.ExchangeTimeZone == TimeZone)
+            {
+                return input.EndTime;
+            }
+            return input.EndTime.ConvertTo(symbolData.ExchangeTimeZone, TimeZone);
+        }
+
+        /// <summary>
         /// Computes the next value of this indicator from the given state.
         /// This will be called only when the indicator is ready, that is,
         /// when data for all symbols at a given time is available.
@@ -131,8 +154,7 @@ namespace QuantConnect.Indicators
         /// </summary>
         private void SetResolution(TInput input)
         {
-            var timeDifference = input.EndTime - input.Time;
-            var resolution = timeDifference.TotalHours > 1 ? Resolution.Daily : timeDifference.ToHigherResolutionEquivalent(false);
+            var resolution = GetResolution(input);
             foreach (var (symbol, data) in DataBySymbol)
             {
                 data.SetResolution(resolution);
@@ -144,6 +166,15 @@ namespace QuantConnect.Indicators
         }
 
         /// <summary>
+        /// Determines the resolution of the input data based on the time difference between its start and end times
+        /// </summary>
+        private static Resolution GetResolution(TInput input)
+        {
+            var timeDifference = input.EndTime - input.Time;
+            return timeDifference.TotalHours > 1 ? Resolution.Daily : timeDifference.ToHigherResolutionEquivalent(false);
+        }
+
+        /// <summary>
         /// Contains the data points, the current input and other relevant indicator data for a symbol.
         /// </summary>
         protected class SymbolData
@@ -151,7 +182,7 @@ namespace QuantConnect.Indicators
             private static MarketHoursDatabase _marketHoursDatabase = MarketHoursDatabase.FromDataFolder();
 
             private TInput _currentInput;
-            private Resolution _resolution;
+            private Resolution? _resolution;
 
             /// <summary>
             /// The exchange time zone for the security represented by this symbol.
@@ -176,6 +207,8 @@ namespace QuantConnect.Indicators
                     _currentInput = value;
                     if (_currentInput != null)
                     {
+                        // Without a resolution set, such as for a symbol added after the first input, use the input's own
+                        _resolution ??= GetResolution(_currentInput);
                         CurrentInputEndTimeUtc = AdjustDateToResolution(_currentInput.EndTime.ConvertToUtc(ExchangeTimeZone));
                         NewInput?.Invoke(this, _currentInput);
                     }
@@ -212,6 +245,7 @@ namespace QuantConnect.Indicators
             {
                 DataPoints.Reset();
                 CurrentInput = default;
+                _resolution = null;
             }
 
             /// <summary>

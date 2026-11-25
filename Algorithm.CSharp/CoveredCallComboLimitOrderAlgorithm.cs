@@ -30,7 +30,7 @@ namespace QuantConnect.Algorithm.CSharp
     /// </summary>
     public class CoveredCallComboLimitOrderAlgorithm : QCAlgorithm, IRegressionAlgorithmDefinition
     {
-        private DateTime _submittionTime;
+        private DateTime _submissionTime;
         private Symbol _optionSymbol;
 
         public override void Initialize()
@@ -75,10 +75,10 @@ namespace QuantConnect.Algorithm.CSharp
                         // just to make sure the price makes sense
                         throw new RegressionTestException($"Unexpected combo price {comboPrice}");
                     }
-                    // place order slightly bellow price
+                    // place order slightly below price
                     ComboLimitOrder(legs, 6, comboPrice - 0.5m);
 
-                    _submittionTime = Time;
+                    _submissionTime = Time;
                 }
             }
         }
@@ -86,10 +86,10 @@ namespace QuantConnect.Algorithm.CSharp
         public override void OnOrderEvent(OrderEvent orderEvent)
         {
             Debug(orderEvent.ToString());
-            if (orderEvent.Status.IsFill() && (Time - _submittionTime) < TimeSpan.FromMinutes(10))
+            if (orderEvent.Status.IsFill() && (Time - _submissionTime) < TimeSpan.FromMinutes(10))
             {
                 // we want to make sure we fill because the price moved and hit our limit price
-                throw new RegressionTestException($"Unexpected fill time {Time} submittion time {_submittionTime}");
+                throw new RegressionTestException($"Unexpected fill time {Time} submission time {_submissionTime}");
             }
         }
 

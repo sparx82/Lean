@@ -37,7 +37,7 @@
     <Compile Include="..\Common\Properties\SharedAssemblyInfo.cs" Link="Properties\SharedAssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="QuantConnect.pythonnet" Version="2.0.65" />
+    <PackageReference Include="QuantConnect.pythonnet" Version="2.0.70" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="OptionUniverseFilterGreeksShortcutsRegressionAlgorithm.py" />
@@ -261,6 +261,7 @@
     <None Include="Benchmarks\CoarseFineUniverseSelectionBenchmark.py" />
     <None Include="Benchmarks\IndicatorRibbonBenchmark.py" />
     <None Include="Benchmarks\ScheduledEventsBenchmark.py" />
+    <None Include="Benchmarks\EmptyFuturesBenchmark.py" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Algorithm\QuantConnect.Algorithm.csproj" />

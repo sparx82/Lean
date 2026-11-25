@@ -27,6 +27,7 @@ using QuantConnect.Securities;
 using QuantConnect.Securities.Future;
 using QuantConnect.Securities.Option;
 using QuantConnect.Statistics;
+using QuantConnect.Storage;
 using QuantConnect.Util;
 using System;
 using System.Collections.Generic;
@@ -165,7 +166,10 @@ namespace QuantConnect.Research
                         StorageAccess = Config.GetValue("storage-permissions", new Packets.StoragePermissions())
                     },
                     AlgorithmMode.Research);
-                SetObjectStore(algorithmHandlers.ObjectStore);
+                // key warnings go to the engine log, like every other QuantBook message: nothing drains the debug messages here
+                SetObjectStore(_isPythonNotebook
+                    ? new PythonObjectStore(algorithmHandlers.ObjectStore)
+                    : new ObjectStore(algorithmHandlers.ObjectStore));
 
                 _dataCacheProvider = new ZipDataCacheProvider(algorithmHandlers.DataProvider);
                 _dataProvider = algorithmHandlers.DataProvider;
@@ -236,7 +240,7 @@ namespace QuantConnect.Research
         [Obsolete("Please use the 'UniverseHistory()' API")]
         public PyObject GetFundamental(PyObject input, string selector = null, DateTime? start = null, DateTime? end = null)
         {
-            //Covert to symbols
+            //Convert to symbols
             var symbols = PythonUtil.ConvertToSymbols(input);
 
             //Fetch the data
@@ -444,7 +448,7 @@ namespace QuantConnect.Research
                 var allSymbols = new HashSet<Symbol>();
                 var optionFilterUniverse = new OptionFilterUniverse(option);
 
-                foreach (var (date, chainData, underlyingData) in GetChainHistory<OptionUniverse>(option, start, end.Value, extendedMarketHours))
+                foreach (var (_, chainData, underlyingData) in GetChainHistory<OptionUniverse>(option, start, end.Value, extendedMarketHours))
                 {
                     if (underlyingData is not null)
                     {
@@ -453,7 +457,6 @@ namespace QuantConnect.Research
                     }
                 }
 
-                var distinctSymbols = allSymbols.Distinct().Select(x => new OptionUniverse() { Symbol = x, Time = start });
                 symbols = allSymbols.Concat(new[] { symbol.Underlying });
             }
             else
@@ -506,7 +509,7 @@ namespace QuantConnect.Research
                 // canonical symbol, lets find the contracts
                 var future = Securities[symbol] as Future;
 
-                foreach (var (date, chainData, underlyingData) in GetChainHistory<FutureUniverse>(future, start, end.Value, extendedMarketHours))
+                foreach (var (date, chainData, _) in GetChainHistory<FutureUniverse>(future, start, end.Value, extendedMarketHours))
                 {
                     allSymbols.UnionWith(future.ContractFilter.Filter(new FutureFilterUniverse(chainData, date)).Select(x => x.Symbol));
                 }
@@ -706,7 +709,6 @@ namespace QuantConnect.Research
         {
             var universeSymbol = ((BaseDataCollection)typeof(T1).GetBaseDataInstance()).UniverseSymbol();
 
-            var symbols = new[] { universeSymbol };
             var endDate = end ?? DateTime.UtcNow.Date;
             var requests = CreateDateRangeHistoryRequests(new[] { universeSymbol }, typeof(T1), start, endDate);
             var history = GetDataTypedHistory<BaseDataCollection>(requests).Select(x => x.Values.Single());
@@ -831,7 +833,7 @@ namespace QuantConnect.Research
                 var listBenchmark = CalculateDailyRateOfChange(dictBenchmark);
                 var listPerformance = CalculateDailyRateOfChange(dictEquity);
 
-                // Gets the startting capital
+                // Gets the starting capital
                 var startingCapital = Convert.ToDecimal(dictEquity.FirstOrDefault().Value);
 
                 // call method to set tradingDayPerYear for Algorithm (use: backwards compatibility)
@@ -864,7 +866,7 @@ namespace QuantConnect.Research
         }
 
         /// <summary>
-        /// Get's the universe data for the specified date
+        /// Gets the universe data for the specified date
         /// </summary>
         private IReadOnlyList<T> GetChainHistory<T>(Symbol canonicalSymbol, DateTime date, out BaseData underlyingData)
             where T : BaseChainUniverseData

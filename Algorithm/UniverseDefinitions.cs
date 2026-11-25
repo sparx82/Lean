@@ -316,7 +316,7 @@ namespace QuantConnect.Algorithm
         }
 
         /// <summary>
-        /// Creates a new fine universe that contains the constituents of QC500 index based onthe company fundamentals
+        /// Creates a new fine universe that contains the constituents of QC500 index based on the company fundamentals
         /// The algorithm creates a default tradable and liquid universe containing 500 US equities
         /// which are chosen at the first trading day of each month.
         /// </summary>
@@ -341,7 +341,6 @@ namespace QuantConnect.Algorithm
         {
             universeSettings ??= _algorithm.UniverseSettings;
 
-            var symbol = Symbol.Create("us-equity-dollar-volume-top-" + count, SecurityType.Equity, Market.USA);
             return FundamentalUniverse.USA(selectionData => (
                 from c in selectionData
                 orderby c.DollarVolume descending

@@ -77,11 +77,43 @@ namespace QuantConnect.Tests.Algorithm.Framework.Selection
             Assert.IsTrue(fineCountByDateTime.All(kvp => kvp.Key.Day == 1 && kvp.Value == 500));
         }
 
+        // The new Morningstar generation codes the NYSE as "NYSE" and leaves some primary exchanges empty
+        [TestCase(Language.CSharp, "NYSE", null, true)]
+        [TestCase(Language.Python, "NYSE", null, true)]
+        [TestCase(Language.CSharp, null, "NAS", true)]
+        [TestCase(Language.Python, null, "NAS", true)]
+        [TestCase(Language.CSharp, "TSX", "NYSE", false)]
+        [TestCase(Language.Python, "TSX", "NYSE", false)]
+        public void FiltersUniverseWithNewMorningstarData(Language language, string primaryExchangeId, string exchangeId, bool selects)
+        {
+            RunSimulation(language,
+                (symbol, time) => new CoarseFundamentalSource
+                {
+                    Symbol = symbol,
+                    EndTime = time,
+                    Value = 100,
+                    VolumeSetter = 1000,
+                    DollarVolumeSetter = 100000 * double.Parse(symbol.Value.Substring(3)),
+                    HasFundamentalDataSetter = true
+                },
+                (symbol, time) => new FineFundamental(time, symbol)
+                {
+                    Value = 100
+                },
+                new TestFundamentalDataProvider(_industryTemplateCodeDict, primaryExchangeId, exchangeId),
+                out var algorithm,
+                out _,
+                out var fineCountByDateTime);
+
+            var months = (algorithm.EndDate - algorithm.StartDate).Days / 30;
+            Assert.AreEqual(selects ? months : 0, fineCountByDateTime.Count);
+            Assert.IsTrue(fineCountByDateTime.All(kvp => kvp.Value == 500));
+        }
+
         [TestCase(Language.CSharp)]
         [TestCase(Language.Python)]
         public void DoesNotFilterUniverseWithCoarseDataHasFundamentalFalse(Language language)
         {
-            QCAlgorithm algorithm;
             Dictionary<DateTime, int> coarseCountByDateTime;
             Dictionary<DateTime, int> fineCountByDateTime;
 
@@ -93,7 +125,7 @@ namespace QuantConnect.Tests.Algorithm.Framework.Selection
                 },
                 (symbol, time) => new FineFundamental(time, symbol),
                 new TestFundamentalDataProvider(_industryTemplateCodeDict),
-                out algorithm,
+                out _,
                 out coarseCountByDateTime,
                 out fineCountByDateTime); ;
 
@@ -106,7 +138,6 @@ namespace QuantConnect.Tests.Algorithm.Framework.Selection
         [TestCase(Language.Python)]
         public void DoesNotFilterUniverseWithInvalidFineData(Language language)
         {
-            QCAlgorithm algorithm;
             Dictionary<DateTime, int> coarseCountByDateTime;
             Dictionary<DateTime, int> fineCountByDateTime;
 
@@ -125,7 +156,7 @@ namespace QuantConnect.Tests.Algorithm.Framework.Selection
                     Value = 100
                 },
                 new NullFundamentalDataProvider(),
-                out algorithm,
+                out _,
                 out coarseCountByDateTime,
                 out fineCountByDateTime);
 
@@ -222,10 +253,15 @@ namespace QuantConnect.Tests.Algorithm.Framework.Selection
         private class TestFundamentalDataProvider : IFundamentalDataProvider
         {
             private readonly Dictionary<char, string> _industryTemplateCodeDict;
+            private readonly string _primaryExchangeId;
+            private readonly string _exchangeId;
 
-            public TestFundamentalDataProvider(Dictionary<char, string> industryTemplateCodeDict)
+            public TestFundamentalDataProvider(Dictionary<char, string> industryTemplateCodeDict, string primaryExchangeId = "NYS",
+                string exchangeId = null)
             {
                 _industryTemplateCodeDict = industryTemplateCodeDict;
+                _primaryExchangeId = primaryExchangeId;
+                _exchangeId = exchangeId;
             }
             public T Get<T>(DateTime time, SecurityIdentifier securityIdentifier, FundamentalProperty name)
             {
@@ -243,6 +279,8 @@ namespace QuantConnect.Tests.Algorithm.Framework.Selection
                 {
                     case "CompanyProfile_MarketCap":
                         return 500000001;
+                    case "SecurityReference_ExchangeId":
+                        return _exchangeId;
                     case "SecurityReference_IPODate":
                         return time.AddDays(-200);
                     case "EarningReports_BasicAverageShares_ThreeMonths":
@@ -250,7 +288,7 @@ namespace QuantConnect.Tests.Algorithm.Framework.Selection
                     case "CompanyReference_CountryId":
                         return "USA";
                     case "CompanyReference_PrimaryExchangeID":
-                        return "NYS";
+                        return _primaryExchangeId;
                     case "CompanyReference_IndustryTemplateCode":
                         return _industryTemplateCodeDict[securityIdentifier.Symbol[0]];
                 }

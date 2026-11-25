@@ -27,6 +27,8 @@ namespace QuantConnect.Optimizer.Strategies
     /// </summary>
     public abstract class StepBaseOptimizationStrategy : IOptimizationStrategy
     {
+        private const decimal SmallestPositiveStep = 0.0000000000000000000000000001m;
+
         private int _i;
 
         /// <summary>
@@ -112,13 +114,14 @@ namespace QuantConnect.Optimizer.Strategies
         /// <returns>Number of parameter sets for given optimization parameters</returns>
         public int GetTotalBacktestEstimate()
         {
-            var total = 1;
+            // both factors are at most int.MaxValue so their product fits in a long, the total is capped since it can't fit in an int
+            long total = 1;
             foreach (var arg in OptimizationParameters)
             {
-                total *= Estimate(arg);
+                total = Math.Min(total * Estimate(arg), int.MaxValue);
             }
 
-            return total;
+            return (int)total;
         }
 
         /// <summary>
@@ -142,7 +145,54 @@ namespace QuantConnect.Optimizer.Strategies
                 throw new InvalidOperationException("Optimization parameter cannot be estimated due to step value is not initialized");
             }
 
-            return (int)Math.Floor((stepParameter.MaxValue - stepParameter.MinValue) / stepParameter.Step.Value) + 1;
+            // the step can be set to zero after initialization, the grid would never be exhausted
+            if (stepParameter.Step.Value <= 0)
+            {
+                throw new InvalidOperationException($"Optimization parameter cannot be estimated due to step value is not positive, but was {stepParameter.Step.Value}");
+            }
+
+            // dividing the range by the step can round across a grid boundary, so search for the last index meeting the
+            // enumerator's own 'MinValue + index * Step <= MaxValue' condition, which is monotonic in the index
+            bool IsInGrid(long index)
+            {
+                try
+                {
+                    return stepParameter.MinValue + index * stepParameter.Step.Value <= stepParameter.MaxValue;
+                }
+                catch (OverflowException)
+                {
+                    // the step is positive, so an overflowing value is above any max value
+                    return false;
+                }
+            }
+
+            long lastInGrid = 0;
+            long firstOutOfGrid = 1;
+            while (IsInGrid(firstOutOfGrid))
+            {
+                if (firstOutOfGrid >= int.MaxValue - 1)
+                {
+                    // the count doesn't fit in an int, the estimate is capped
+                    return int.MaxValue;
+                }
+                lastInGrid = firstOutOfGrid;
+                firstOutOfGrid = Math.Min(firstOutOfGrid * 2, int.MaxValue - 1);
+            }
+
+            while (firstOutOfGrid - lastInGrid > 1)
+            {
+                var middle = lastInGrid + (firstOutOfGrid - lastInGrid) / 2;
+                if (IsInGrid(middle))
+                {
+                    lastInGrid = middle;
+                }
+                else
+                {
+                    firstOutOfGrid = middle;
+                }
+            }
+
+            return (int)lastInGrid + 1;
         }
 
         /// <summary>
@@ -195,8 +245,16 @@ namespace QuantConnect.Optimizer.Strategies
                 throw new ArgumentException($"Number of segments should be positive number, but specified '{defaultSegmentAmount}'", nameof(defaultSegmentAmount));
             }
 
-            parameter.Step = Math.Abs(parameter.MaxValue - parameter.MinValue) / defaultSegmentAmount;
-            parameter.MinStep = parameter.Step / 10;
+            // a zero step never exhausts the grid: any positive step enumerates a single value once, without changing its precision,
+            // and a range too narrow for its segments gets the finest step decimal can represent
+            if (parameter.MinValue == parameter.MaxValue)
+            {
+                parameter.Step = parameter.MinStep = 1;
+                return;
+            }
+
+            parameter.Step = Math.Max(SmallestPositiveStep, Math.Abs(parameter.MaxValue - parameter.MinValue) / defaultSegmentAmount);
+            parameter.MinStep = Math.Max(SmallestPositiveStep, parameter.Step.Value / 10);
         }
 
         private IEnumerable<Dictionary<string, string>> Recursive(Queue<OptimizationParameter> args)

@@ -16,12 +16,15 @@
 using QuantConnect.Data;
 using QuantConnect.Data.Auxiliary;
 using QuantConnect.Data.Market;
+using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Securities;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using QuantConnect.Lean.Engine.DataFeeds.Enumerators;
 using QuantConnect.Logging;
+using QuantConnect.Util;
 
 namespace QuantConnect.ToolBox.RandomDataGenerator
 {
@@ -74,6 +77,8 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
             var count = 0;
             var progress = 0d;
             var previousMonth = -1;
+            // daily data of the generated derivative contracts and their underlying, by canonical symbol, used to generate the universe files
+            var universeDownloaders = new Dictionary<Symbol, InMemoryDataDownloader>();
 
             foreach (var (symbolRef, currentSymbolGroup) in symbolGenerator.GenerateRandomSymbols()
                 .GroupBy(s => s.HasUnderlying ? s.Underlying : s)
@@ -84,6 +89,7 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
                 var tickGenerators = new List<IEnumerator<Tick>>();
                 var tickHistories = new Dictionary<Symbol, List<Tick>>();
                 Security underlyingSecurity = null;
+                InMemoryDataDownloader universeDownloader = null;
                 foreach (var currentSymbol in currentSymbolGroup)
                 {
                     if (!_securityManager.TryGetValue(currentSymbol, out var security))
@@ -96,6 +102,11 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
                     }
 
                     underlyingSecurity ??= security;
+
+                    if (currentSymbol.HasCanonical() && !universeDownloaders.TryGetValue(currentSymbol.Canonical, out universeDownloader))
+                    {
+                        universeDownloader = universeDownloaders[currentSymbol.Canonical] = new InMemoryDataDownloader(security.Exchange.Hours);
+                    }
 
                     tickGenerators.Add(
                         new TickGenerator(_settings, tickTypesPerSecurityType[currentSymbol.SecurityType].ToArray(), security, randomValueGenerator)
@@ -215,7 +226,6 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
                     // define aggregators via settings
                     var aggregators = CreateAggregators(_settings, tickTypesPerSecurityType[currentSymbol.SecurityType].ToArray()).ToList();
                     Symbol previousSymbol = null;
-                    var currentCount = 0;
                     var monthsTrading = 0;
 
                     foreach (var renamed in renamedSymbols)
@@ -268,7 +278,14 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
                             // lest we likely wouldn't get the last piece of data stuck in the consolidator
                             // Filter out the data we're going to write here because filtering them in the consolidator update phase
                             // makes it write all dates for some unknown reason
-                            writer.Write(item.Flush().Where(data => data.Time > previousRenameDate && previousRenameDateDay != DataDay(data)));
+                            var consolidated = item.Flush().Where(data => data.Time > previousRenameDate && previousRenameDateDay != DataDay(data)).ToList();
+                            writer.Write(consolidated);
+
+                            if (item.Resolution == Resolution.Daily)
+                            {
+                                // the daily data is what we use to generate the derivative universe files
+                                universeDownloader?.Add(item.TickType, consolidated);
+                            }
                         }
 
                         // update progress
@@ -276,8 +293,23 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
                         Log.Trace($"RandomDataGenerator.Run(): Symbol[{count}]: {symbol} Progress: {progress:0.0}% - Symbol data generation and output completed");
 
                         previousSymbol = renamed.Key;
-                        currentCount++;
                     }
+                }
+            }
+
+            foreach (var (canonicalSymbol, universeDownloader) in universeDownloaders)
+            {
+                Log.Trace($"RandomDataGenerator.Run(): {canonicalSymbol} - Generating universe files...");
+                try
+                {
+                    Directory.CreateDirectory(LeanData.GenerateUniversesDirectory(Globals.DataFolder, canonicalSymbol));
+                    UniverseExtensions.RunUniverseDownloader(universeDownloader,
+                        new DataUniverseDownloaderGetParameters(canonicalSymbol, _settings.Start, _settings.End, universeDownloader.ExchangeHours));
+                }
+                catch (Exception exception)
+                {
+                    // the universe files are a nice to have, let's not fail the whole generation
+                    Log.Error(exception, $"RandomDataGenerator.Run(): {canonicalSymbol} - Failed to generate universe files");
                 }
             }
 
@@ -316,8 +348,9 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
             }
 
 
-            // ensure we have a daily consolidator when coarse is enabled
-            if (settings.IncludeCoarse && settings.Resolution != Resolution.Daily)
+            // ensure we have a daily consolidator when coarse is enabled or for derivatives, whose universe files are generated from daily data
+            var isDerivative = settings.SecurityType.IsOption() || settings.SecurityType == SecurityType.Future;
+            if ((settings.IncludeCoarse || isDerivative) && settings.Resolution != Resolution.Daily)
             {
                 // prefer trades for coarse - in practice equity only does trades, but leaving this as configurable
                 if (tickTypes.Contains(TickType.Trade))
@@ -327,6 +360,11 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
                 else
                 {
                     yield return TickAggregator.ForTickTypes(settings.SecurityType, Resolution.Daily, TickType.Quote).Single();
+                }
+
+                if (isDerivative && tickTypes.Contains(TickType.OpenInterest))
+                {
+                    yield return TickAggregator.ForTickTypes(settings.SecurityType, Resolution.Daily, TickType.OpenInterest).Single();
                 }
             }
         }

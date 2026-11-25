@@ -294,7 +294,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
         }
 
         /// <summary>
-        /// Remove all expired insights from the collection and retuns them
+        /// Remove all expired insights from the collection and returns them
         /// </summary>
         /// <param name="utcTime">Time that determines whether the insight has expired</param>
         /// <returns>Expired insights that were removed</returns>
@@ -331,7 +331,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
             {
                 _insightsComplete.RemoveAll(insight => filter(insight));
 
-                // for consistentcy remove from open insights just in case
+                // for consistency remove from open insights just in case
                 List<Insight> insightsToRemove = null;
                 foreach (var insights in _insights.Values)
                 {

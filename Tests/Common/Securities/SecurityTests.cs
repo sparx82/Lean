@@ -147,7 +147,7 @@ namespace QuantConnect.Tests.Common.Securities
         {
             var security = GetSecurity();
 
-            // Update securuty price with a TradeBar
+            // Update security price with a TradeBar
             security.SetMarketPrice(new TradeBar(DateTime.Now, Symbols.SPY, 101m, 103m, 100m, 102m, 100000));
 
             Assert.AreEqual(101m, security.Open);
@@ -401,7 +401,7 @@ namespace QuantConnect.Tests.Common.Securities
             Assert.AreEqual(new DateTime(2023, 06, 20), dynamicSecurity.DateTime);
             Assert.AreEqual(new ExponentialMovingAverage(10), dynamicSecurity.EMA);
 
-            Assert.Throws<RuntimeBinderException>(() => { var notAProperty = dynamicSecurity.NotAProperty; });
+            Assert.Throws<RuntimeBinderException>(() => { _ = dynamicSecurity.NotAProperty; });
         }
 
         [Test]
@@ -496,7 +496,7 @@ namespace QuantConnect.Tests.Common.Securities
             Assert.AreEqual(new DateTime(2023, 06, 20), security["DateTime"]);
             Assert.AreEqual(new ExponentialMovingAverage(10), security["EMA"]);
 
-            Assert.Throws<KeyNotFoundException>(() => { var notAProperty = security["NotAProperty"]; });
+            Assert.Throws<KeyNotFoundException>(() => { _ = security["NotAProperty"]; });
         }
 
         [Test]

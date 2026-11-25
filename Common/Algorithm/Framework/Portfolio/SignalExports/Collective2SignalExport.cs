@@ -363,6 +363,12 @@ namespace QuantConnect.Algorithm.Framework.Portfolio.SignalExports
             {
                 return symbol.Underlying.Value;
             }
+            else if (symbol.SecurityType == SecurityType.Equity)
+            {
+                // The ticker the security trades under today. SecurityIdentifier.Symbol is the ticker it first
+                // listed under, which Collective2 no longer knows once the security has been renamed (e.g. BGU -> SPXL)
+                return _algorithm.Ticker(symbol);
+            }
             else
             {
                 return symbol.ID.Symbol;
@@ -572,7 +578,7 @@ namespace QuantConnect.Algorithm.Framework.Portfolio.SignalExports
             public C2ExchangeSymbol ExchangeSymbol { get; set; }
 
             /// <summary>
-            /// Number of shares/contracts of the given symbol. Positive quantites are long positions
+            /// Number of shares/contracts of the given symbol. Positive quantities are long positions
             /// and negative short positions.
             /// </summary>
             [JsonProperty(PropertyName = "quantity")]

@@ -198,7 +198,8 @@ namespace QuantConnect.Brokerages
                     return new DefaultBrokerageModel(accountType);
 
                 case BrokerageName.TerminalLink:
-                    return new TerminalLinkBrokerageModel(accountType);
+                case BrokerageName.QuantBridge:
+                    return new QuantBridgeBrokerageModel(accountType);
 
                 case BrokerageName.Alpaca:
                     return new AlpacaBrokerageModel();
@@ -302,8 +303,11 @@ namespace QuantConnect.Brokerages
                 case BrokerageName.BloombergFix:
                     return new BloombergFixBrokerageModel(accountType);
 
-                case BrokerageName.Saxo:
-                    return new SaxoBrokerageModel(accountType);
+                case BrokerageName.ClearStreet:
+                    return new ClearStreetBrokerageModel(accountType);
+
+                case BrokerageName.Etoro:
+                    return new EtoroBrokerageModel(accountType);
 
                 default:
                     throw new ArgumentOutOfRangeException(nameof(brokerage), brokerage, null);
@@ -402,6 +406,9 @@ namespace QuantConnect.Brokerages
                 case TradeStationBrokerageModel _:
                     return BrokerageName.TradeStation;
 
+                case QuantBridgeBrokerageModel:
+                    return BrokerageName.QuantBridge;
+
                 case CharlesSchwabBrokerageModel:
                     return BrokerageName.CharlesSchwab;
 
@@ -416,6 +423,12 @@ namespace QuantConnect.Brokerages
 
                 case BloombergFixBrokerageModel _:
                     return BrokerageName.BloombergFix;
+
+                case ClearStreetBrokerageModel:
+                    return BrokerageName.ClearStreet;
+
+                case EtoroBrokerageModel:
+                    return BrokerageName.Etoro;
 
                 case DefaultBrokerageModel _:
                     return BrokerageName.Default;

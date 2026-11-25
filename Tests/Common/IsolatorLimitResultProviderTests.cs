@@ -20,6 +20,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using QuantConnect.Lean.Engine.DataFeeds;
+using QuantConnect.Logging;
 using QuantConnect.Scheduling;
 using QuantConnect.Util;
 
@@ -144,16 +145,59 @@ namespace QuantConnect.Tests.Common
             Assert.AreEqual(0, _timeMonitor.Count);
         }
 
+        [Test]
+        public void ConsumeNamesTheWorkWhenRequestingAdditionalTime()
+        {
+            var previousLogHandler = Log.LogHandler;
+            try
+            {
+                var logHandler = new QueueLogHandler();
+                Log.LogHandler = logHandler;
+                var userWarnings = new List<string>();
+                _timeMonitor.UserWarningHandler = userWarnings.Add;
+
+                var timeProvider = new ManualTimeProvider(new DateTime(2000, 01, 01));
+                var provider = new FakeIsolatorLimitResultProvider();
+
+                Action code = () =>
+                {
+                    // lets give the monitor time to register the initial time
+                    _timeMonitorEvent.WaitOne();
+                    timeProvider.Advance(TimeSpan.FromSeconds(65));
+                    // give the monitoring task time to request more time
+                    _timeMonitorEvent.WaitOne();
+                };
+
+                provider.Consume(timeProvider, code, _timeMonitor, "My Slow Scheduled Event");
+
+                Assert.AreEqual(1, provider.Invocations.Count);
+                Assert.AreEqual(1, logHandler.Logs.Count(
+                    entry => entry.Message.Contains("'My Slow Scheduled Event' has been executing for over 1 minute")));
+                // the warning also reaches the user
+                Assert.AreEqual(1, userWarnings.Count(
+                    message => message.Contains("'My Slow Scheduled Event' has been executing for over 1 minute")));
+
+                // give time to the monitor to register the time consumer ended
+                _timeMonitorEvent.WaitOne();
+                Assert.AreEqual(0, _timeMonitor.Count);
+            }
+            finally
+            {
+                Log.LogHandler = previousLogHandler;
+                _timeMonitor.UserWarningHandler = null;
+            }
+        }
+
         private class FakeIsolatorLimitResultProvider : IIsolatorLimitResultProvider
         {
-            private List<int> _ivocations = new List<int>();
+            private List<int> _invocations = new List<int>();
             public List<int> Invocations
             {
                 get
                 {
-                    lock (_ivocations)
+                    lock (_invocations)
                     {
-                        return _ivocations.ToList();
+                        return _invocations.ToList();
                     }
                 }
             }
@@ -165,17 +209,17 @@ namespace QuantConnect.Tests.Common
 
             public void RequestAdditionalTime(int minutes)
             {
-                lock (_ivocations)
+                lock (_invocations)
                 {
-                    _ivocations.Add(minutes);
+                    _invocations.Add(minutes);
                 }
             }
 
             public bool TryRequestAdditionalTime(int minutes)
             {
-                lock (_ivocations)
+                lock (_invocations)
                 {
-                    _ivocations.Add(minutes);
+                    _invocations.Add(minutes);
                 }
                 return true;
             }

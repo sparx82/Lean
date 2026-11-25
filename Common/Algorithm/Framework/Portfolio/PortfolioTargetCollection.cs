@@ -99,7 +99,7 @@ namespace QuantConnect.Algorithm.Framework.Portfolio
 
         /// <summary>
         /// Adds the specified target to the collection. If a target for the same symbol
-        /// already exists it wil be overwritten.
+        /// already exists it will be overwritten.
         /// </summary>
         /// <param name="target">The portfolio target to add</param>
         public void Add(IPortfolioTarget target)
@@ -119,17 +119,17 @@ namespace QuantConnect.Algorithm.Framework.Portfolio
 
         /// <summary>
         /// Adds the specified target to the collection. If a target for the same symbol
-        /// already exists it wil be overwritten.
+        /// already exists it will be overwritten.
         /// </summary>
         /// <param name="target">The portfolio target to add</param>
         public void Add(KeyValuePair<Symbol, IPortfolioTarget> target)
         {
-            Add(target);
+            Add(target.Value);
         }
 
         /// <summary>
         /// Adds the specified target to the collection. If a target for the same symbol
-        /// already exists it wil be overwritten.
+        /// already exists it will be overwritten.
         /// </summary>
         /// <param name="symbol">The symbol key</param>
         /// <param name="target">The portfolio target to add</param>
@@ -224,7 +224,10 @@ namespace QuantConnect.Algorithm.Framework.Portfolio
         /// <returns>True if the pair exists, false otherwise</returns>
         public bool Contains(KeyValuePair<Symbol, IPortfolioTarget> target)
         {
-            return Contains(target);
+            lock (_targets)
+            {
+                return ((ICollection<KeyValuePair<Symbol, IPortfolioTarget>>)_targets).Contains(target);
+            }
         }
 
         /// <summary>

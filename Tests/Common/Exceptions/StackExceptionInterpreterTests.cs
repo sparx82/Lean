@@ -27,7 +27,6 @@ namespace QuantConnect.Tests.Common.Exceptions
         [Test]
         public void CreatesFromAssemblies()
         {
-            var assembly = typeof(ClrBubbledExceptionInterpreter).Assembly;
             var interpreter = StackExceptionInterpreter.CreateFromAssemblies();
             Assert.AreEqual(1, interpreter.Interpreters.Count(p => p.GetType() == typeof(ClrBubbledExceptionInterpreter)));
         }
@@ -74,7 +73,7 @@ namespace QuantConnect.Tests.Common.Exceptions
             var interpreter = new StackExceptionInterpreter(interpreters);
             interpreter.Interpret(new Exception(), null);
 
-            // can interpret called for 3nd and 2rd entry
+            // can interpret called for 3rd and 2nd entry
             Assert.Contains(2, canInterpretCalled);
             Assert.Contains(1, canInterpretCalled);
             Assert.That(canInterpretCalled, Is.Not.Contains(0));

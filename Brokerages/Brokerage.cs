@@ -45,6 +45,11 @@ namespace QuantConnect.Brokerages
         private bool _syncedLiveBrokerageCashToday = true;
         private long _lastSyncTimeTicks = DateTime.UtcNow.Ticks;
 
+        private const int Connected = 1;
+        private const int Disconnected = 0;
+        // written by brokerage threads and read by the transaction handler, always through Interlocked/Volatile
+        private int _connectionState = Connected;
+
         /// <summary>
         /// Event that fires each time the brokerage order id changes
         /// </summary>
@@ -198,6 +203,44 @@ namespace QuantConnect.Brokerages
         }
 
         /// <summary>
+        /// Helper method for brokerages which support contingent orders (OCO, OTO, OUO, brackets): to be called after emitting fill order events,
+        /// it will notify through <see cref="OnOrderUpdated"/> the children orders which were triggered by an order which completely filled,
+        /// all its legs for a combo order, so they are no longer held by the brokerage but working in the market
+        /// </summary>
+        /// <param name="orderEvents">The order events that were emitted</param>
+        /// <param name="orderProvider">The order provider to use</param>
+        protected void OnContingentOrdersTriggered(IReadOnlyList<OrderEvent> orderEvents, IOrderProvider orderProvider)
+        {
+            try
+            {
+                if (orderProvider == null || orderEvents == null)
+                {
+                    return;
+                }
+
+                // only fills trigger children, other events could add actions on the same orders, like canceling them
+                // the brokerage cancels and resizes the orders on its side, so only the triggered ones are notified
+                var (updates, _) = TriggeredContingentOrdersProcessor.Process(orderEvents.Where(orderEvent => orderEvent.Status == OrderStatus.Filled),
+                    orderProvider.GetOrderById, DateTime.UtcNow);
+                if (updates == null)
+                {
+                    return;
+                }
+                foreach (var update in updates)
+                {
+                    if (update.ContingencyTriggered)
+                    {
+                        OnOrderUpdated(update);
+                    }
+                }
+            }
+            catch (Exception err)
+            {
+                Log.Error(err);
+            }
+        }
+
+        /// <summary>
         /// Event invocator for the OrderIdChanged event
         /// </summary>
         /// <param name="e">The BrokerageOrderIdChangedEvent</param>
@@ -311,6 +354,22 @@ namespace QuantConnect.Brokerages
         {
             try
             {
+                // only let through actual state changes, else a retrying brokerage restarts Lean's recovery window on each attempt
+                if (e.Type == BrokerageMessageType.Disconnect)
+                {
+                    if (Interlocked.Exchange(ref _connectionState, Disconnected) == Disconnected)
+                    {
+                        return;
+                    }
+                }
+                else if (e.Type == BrokerageMessageType.Reconnect)
+                {
+                    if (Interlocked.Exchange(ref _connectionState, Connected) == Connected)
+                    {
+                        return;
+                    }
+                }
+
                 if (e.Type == BrokerageMessageType.Error)
                 {
                     Log.Error("Brokerage.OnMessage(): " + e);
@@ -329,8 +388,8 @@ namespace QuantConnect.Brokerages
         }
 
         /// <summary>
-        /// Creates a <see cref="LeanOAuthTokenHandler"/> and automatically wires it so that
-        /// authentication failures trigger a brokerage error message, causing Lean to shut down gracefully.
+        /// Creates a <see cref="LeanOAuthTokenHandler"/> and automatically wires it so that authentication failures
+        /// report the brokerage as disconnected, and the next successful authentication as reconnected.
         /// </summary>
         /// <param name="apiClient">The API client used to communicate with the Lean platform.</param>
         /// <param name="request">The request model used to generate the access token.</param>
@@ -343,8 +402,26 @@ namespace QuantConnect.Brokerages
             where T : LeanTokenCredentials
         {
             var handler = new LeanOAuthTokenHandler<T>(apiClient, request, tokenLifetime);
-            handler.AuthenticationFailed += (_, ex) => OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Error, "OAuthenticationFailed", ex.Message));
+            handler.AuthenticationFailed += (_, ex) => OnAuthenticationFailed(ex);
+            handler.AuthenticationSucceeded += (_, _) => OnAuthenticationSucceeded();
             return handler;
+        }
+
+        /// <summary>
+        /// Notifies that authentication has succeeded.
+        /// </summary>
+        protected virtual void OnAuthenticationSucceeded()
+        {
+            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Reconnect, "OAuthenticationSucceeded", "Authentication succeeded."));
+        }
+
+        /// <summary>
+        /// Notifies that authentication has failed.
+        /// </summary>
+        /// <param name="exception">The exception that caused the authentication failure.</param>
+        protected virtual void OnAuthenticationFailed(Exception exception)
+        {
+            OnMessage(new BrokerageMessageEvent(BrokerageMessageType.Disconnect, "OAuthenticationFailed", exception.Message));
         }
 
         /// <summary>
@@ -433,6 +510,27 @@ namespace QuantConnect.Brokerages
         public virtual bool AccountInstantlyUpdated => false;
 
         /// <summary>
+        /// True when Lean syncs the option holdings with the brokerage once a day, for the brokerages that report
+        /// nothing when a contract expires or is assigned. A brokerage that reports every option position change
+        /// itself returns false
+        /// </summary>
+        public virtual bool HoldingsSyncEnabled => true;
+
+        /// <summary>
+        /// Cache holding the legs of a combo order until all of them have been placed, so the brokerage can submit them together
+        /// </summary>
+        protected GroupOrderCacheManager GroupOrderCacheManager { get; } = new();
+
+        /// <summary>
+        /// Cache holding the orders of a set of contingent orders (OCO, OTO, OUO, brackets) until all of them have been placed,
+        /// so the brokerage can submit them together
+        /// </summary>
+        protected ContingentOrderCache ContingentOrderCache { get; } = new();
+
+        // only the orders to trigger are used: no filled quantities nor securities are required, it holds no state
+        private static readonly ContingentOrderProcessor TriggeredContingentOrdersProcessor = new(_ => 0, null);
+
+        /// <summary>
         /// Returns the brokerage account's base currency
         /// </summary>
         public virtual string AccountBaseCurrency { get; protected set; }
@@ -486,7 +584,8 @@ namespace QuantConnect.Brokerages
                 _syncedLiveBrokerageCashToday = false;
             }
 
-            return !_syncedLiveBrokerageCashToday && currentTimeNewYork.TimeOfDay >= LiveBrokerageCashSyncTime;
+            return !_syncedLiveBrokerageCashToday && currentTimeNewYork.TimeOfDay >= LiveBrokerageCashSyncTime
+                && Volatile.Read(ref _connectionState) == Connected;
         }
 
         /// <summary>
@@ -541,7 +640,7 @@ namespace QuantConnect.Brokerages
                     }
                 }
 
-                var totalPorfolioValueThreshold = algorithm.Portfolio.TotalPortfolioValue * 0.02m;
+                var totalPortfolioValueThreshold = algorithm.Portfolio.TotalPortfolioValue * 0.02m;
                 // if we were returned our balances, update everything and flip our flag as having performed sync today
                 foreach (var kvp in algorithm.Portfolio.CashBook)
                 {
@@ -553,7 +652,7 @@ namespace QuantConnect.Brokerages
                     {
                         // compare in account currency
                         var delta = cash.Amount - balanceCash.Amount;
-                        if (cash.ConversionRate == 0 || Math.Abs(algorithm.Portfolio.CashBook.ConvertToAccountCurrency(delta, cash.Symbol)) > totalPorfolioValueThreshold)
+                        if (cash.ConversionRate == 0 || Math.Abs(algorithm.Portfolio.CashBook.ConvertToAccountCurrency(delta, cash.Symbol)) > totalPortfolioValueThreshold)
                         {
                             // log the delta between
                             Log.Trace($"Brokerage.PerformCashSync(): {balanceCash.Currency} Delta: {delta:0.00}", true);
@@ -885,7 +984,7 @@ namespace QuantConnect.Brokerages
         /// </item>
         /// </list>
         /// </returns>
-        private static (decimal closePostionQunatity, decimal newPositionQuantity) GetQuantityOnCrossPosition(decimal holdingQuantity, decimal orderQuantity)
+        private static (decimal closePositionQuantity, decimal newPositionQuantity) GetQuantityOnCrossPosition(decimal holdingQuantity, decimal orderQuantity)
         {
             // first we need an order to close out the current position
             var firstOrderQuantity = -holdingQuantity;

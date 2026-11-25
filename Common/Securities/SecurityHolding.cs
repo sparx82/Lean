@@ -84,6 +84,11 @@ namespace QuantConnect.Securities
         }
 
         /// <summary>
+        /// The currency converter of the security's portfolio
+        /// </summary>
+        internal ICurrencyConverter CurrencyConverter => _currencyConverter;
+
+        /// <summary>
         /// Gets the current target holdings for this security
         /// </summary>
         public IPortfolioTarget Target
@@ -119,7 +124,7 @@ namespace QuantConnect.Securities
             }
             protected set
             {
-                // avoid any small values, due to differences in lot size, to return invested true but lean not allowing us to trade sice it will be rounded down to 0
+                // avoid any small values, due to differences in lot size, to return invested true but lean not allowing us to trade since it will be rounded down to 0
                 // specially useful to crypto assets which take fees from the base or quote currency
                 _invested = Math.Abs(value) >= _security.SymbolProperties.LotSize;
                 _quantity = value;
@@ -294,7 +299,7 @@ namespace QuantConnect.Securities
         }
 
         /// <summary>
-        /// BBoolean flag indicating we have a net negative holding of the security.
+        /// Boolean flag indicating we have a net negative holding of the security.
         /// </summary>
         /// <seealso cref="IsLong"/>
         public virtual bool IsShort
@@ -471,6 +476,30 @@ namespace QuantConnect.Securities
         }
 
         /// <summary>
+        /// Calculates profit from signed entry and exit position values expressed in the same currency, excluding fees.
+        /// </summary>
+        /// <param name="entryValue">The value of the quantity at entry</param>
+        /// <param name="exitValue">The value of the quantity at exit</param>
+        /// <returns>The profit in the currency of the supplied values</returns>
+        internal virtual decimal GetProfitFromValueChange(decimal entryValue, decimal exitValue)
+        {
+            return exitValue - entryValue;
+        }
+
+        /// <summary>
+        /// Calculates the average price of the position after a fill adds to it
+        /// </summary>
+        /// <param name="averagePrice">The average price of the position before the fill</param>
+        /// <param name="quantity">The signed quantity of the position before the fill</param>
+        /// <param name="fillPrice">The price of the fill</param>
+        /// <param name="fillQuantity">The signed quantity of the fill, in the direction of the position</param>
+        /// <returns>The average price of the increased position</returns>
+        internal virtual decimal GetAveragePriceAfterIncrease(decimal averagePrice, decimal quantity, decimal fillPrice, decimal fillQuantity)
+        {
+            return (averagePrice * quantity + fillQuantity * fillPrice) / (quantity + fillQuantity);
+        }
+
+        /// <summary>
         /// Profit if we closed the holdings right now including the approximate fees in units of the account's currency.
         /// </summary>
         /// <remarks>Does not use the transaction model for market fills but should.</remarks>
@@ -505,7 +534,7 @@ namespace QuantConnect.Securities
 
             var entryValue = GetQuantityValue(quantityToUse, entryPrice ?? AveragePrice).InAccountCurrency;
             var potentialExitValue = GetQuantityValue(quantityToUse, exitPrice ?? price).InAccountCurrency;
-            return potentialExitValue - entryValue - feesInAccountCurrency;
+            return GetProfitFromValueChange(entryValue, potentialExitValue) - feesInAccountCurrency;
         }
 
         /// <summary>

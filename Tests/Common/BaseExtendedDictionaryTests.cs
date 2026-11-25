@@ -17,7 +17,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
-using Common.Util;
+using QuantConnect.Util;
 using Python.Runtime;
 
 namespace QuantConnect.Tests.Common
@@ -237,6 +237,45 @@ namespace QuantConnect.Tests.Common
         {
             var dict = new ReadOnlyExtendedDictionary<string, int>();
             Assert.Throws<InvalidOperationException>(() => dict.Add("newkey", 123));
+        }
+
+        [Test]
+        public void ReadOnlyExtendedDictionaryIsReadOnlyThroughInterfaces()
+        {
+            var source = new Dictionary<string, int> { { "test", 1 } };
+            var dict = new ReadOnlyExtendedDictionary<string, int>(source, copy: false);
+            var dictionary = (IDictionary<string, int>)dict;
+            var collection = (ICollection<KeyValuePair<string, int>>)dict;
+
+            Assert.Throws<InvalidOperationException>(() => dictionary.Add("newkey", 123));
+            Assert.Throws<InvalidOperationException>(() => dictionary["test"] = 2);
+            Assert.Throws<InvalidOperationException>(() => dictionary.Remove("test"));
+            Assert.Throws<InvalidOperationException>(() => dictionary.Clear());
+            Assert.Throws<InvalidOperationException>(() => collection.Add(new KeyValuePair<string, int>("newkey", 123)));
+            Assert.Throws<InvalidOperationException>(() => collection.Remove(new KeyValuePair<string, int>("test", 1)));
+
+            Assert.AreEqual(1, source.Count);
+            Assert.AreEqual(1, source["test"]);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void ReadOnlyExtendedDictionaryCopiesOrWrapsSource(bool copy)
+        {
+            var source = new Dictionary<string, int> { { "test", 1 } };
+            var dict = new ReadOnlyExtendedDictionary<string, int>(source, copy);
+            Assert.AreEqual(1, dict["test"]);
+
+            // changes made to the source are only reflected when wrapping it
+            source["test"] = 2;
+            source["other"] = 3;
+            Assert.AreEqual(copy ? 1 : 2, dict["test"]);
+            Assert.AreEqual(!copy, dict.ContainsKey("other"));
+
+            // still read only either way
+            Assert.Throws<InvalidOperationException>(() => dict["test"] = 5);
+            Assert.Throws<InvalidOperationException>(() => dict.Add("newkey", 123));
+            Assert.AreEqual(2, source["test"]);
         }
 
         [Test]

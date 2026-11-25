@@ -212,7 +212,8 @@ namespace QuantConnect
             }
             var strike = split[1].Substring(1);
 
-            if (parsed.ExpirationYearShort < 10)
+            // a single digit year is in the 2020s, a double digit year already defines the decade: 'Z05' is 2005
+            if (parsed.ExpirationYearShortLength == 1)
             {
                 parsed.ExpirationYearShort += 20;
             }
@@ -636,10 +637,12 @@ namespace QuantConnect
         {
             if (futureYear.HasValue)
             {
+                // a double digit year already defines the decade, so we can only be off by a century: 'Z36' is 2036 never 2026
+                var step = parsed.ExpirationYearShortLength > 1 ? 100 : 10;
                 var referenceYear = 1900 + parsed.ExpirationYearShort;
                 while (referenceYear < futureYear.Value)
                 {
-                    referenceYear += 10;
+                    referenceYear += step;
                 }
 
                 return referenceYear;

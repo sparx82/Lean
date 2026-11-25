@@ -49,7 +49,7 @@ namespace QuantConnect.Tests.Algorithm
             var algo = new QCAlgorithm();
             algo.SubscriptionManager.SetDataManager(new DataManagerStub(algo));
 
-            // forex defult - should be quotebar
+            // forex default - should be quotebar
             var forexTrade = algo.AddForex("EURUSD");
             Assert.IsTrue(forexTrade.Subscriptions.Count() == 1);
             Assert.IsTrue(GetMatchingSubscription(algo, forexTrade.Symbol, typeof(QuoteBar)) != null);
@@ -206,15 +206,15 @@ namespace QuantConnect.Tests.Algorithm
             qcAlgorithm.Settings.SeedInitialPrices = false;
             var testHistoryProvider = new TestHistoryProvider();
             qcAlgorithm.HistoryProvider = testHistoryProvider;
-            var option = qcAlgorithm.AddOption(testHistoryProvider.underlyingSymbol);
+            qcAlgorithm.AddOption(testHistoryProvider.underlyingSymbol);
 
             var symbol = Symbol.CreateOption(testHistoryProvider.underlyingSymbol, Market.USA, OptionStyle.American,
                 OptionRight.Call, 1, new DateTime(2015, 12, 24));
             var symbol2 = Symbol.CreateOption(testHistoryProvider.underlyingSymbol, Market.USA, OptionStyle.American,
                 OptionRight.Put, 1, new DateTime(2015, 12, 24));
 
-            var optionContract = qcAlgorithm.AddOptionContract(symbol);
-            var optionContract2 = qcAlgorithm.AddOptionContract(symbol2);
+            qcAlgorithm.AddOptionContract(symbol);
+            qcAlgorithm.AddOptionContract(symbol2);
 
             qcAlgorithm.OnEndOfTimeStep();
             var data = qcAlgorithm.Securities[testHistoryProvider.underlyingSymbol].GetLastData();
@@ -263,7 +263,7 @@ namespace QuantConnect.Tests.Algorithm
 
             // Dummy here is meant to try to corrupt the SymbolCache. Ideally, SymbolCache should return non-custom data types with higher priority
             // in case we want to add two custom data types, but still have them associated with the equity from the cache if we're using it.
-            // This covers the case where two idential data subscriptions are created.
+            // This covers the case where two identical data subscriptions are created.
             var dummy = qcAlgorithm.AddData(customDataType, asset.Symbol, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == securityType).First().DataTimeZone);
             var customData = qcAlgorithm.AddData(customDataType, asset.Symbol, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == securityType).First().DataTimeZone);
 
@@ -331,7 +331,7 @@ namespace QuantConnect.Tests.Algorithm
 
             // Dummy here is meant to try to corrupt the SymbolCache. Ideally, SymbolCache should return non-custom data types with higher priority
             // in case we want to add two custom data types, but still have them associated with the equity from the cache if we're using it.
-            // This covers the case where two idential data subscriptions are created.
+            // This covers the case where two identical data subscriptions are created.
             var dummy = qcAlgorithm.AddData(customDataType, ticker, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == securityType).First().DataTimeZone);
             var customData = qcAlgorithm.AddData(customDataType, ticker, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == securityType).First().DataTimeZone);
 
@@ -395,7 +395,7 @@ namespace QuantConnect.Tests.Algorithm
 
             // Dummy here is meant to try to corrupt the SymbolCache. Ideally, SymbolCache should return non-custom data types with higher priority
             // in case we want to add two custom data types, but still have them associated with the equity from the cache if we're using it.
-            // This covers the case where two idential data subscriptions are created.
+            // This covers the case where two identical data subscriptions are created.
             var dummy = qcAlgorithm.AddData(customDataType, ticker, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == securityType).First().DataTimeZone);
             var customData = qcAlgorithm.AddData(customDataType, ticker, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == securityType).First().DataTimeZone);
 
@@ -501,7 +501,7 @@ namespace QuantConnect.Tests.Algorithm
 
             // Dummy here is meant to try to corrupt the SymbolCache. Ideally, SymbolCache should return non-custom data types with higher priority
             // in case we want to add two custom data types, but still have them associated with the equity from the cache if we're using it.
-            // This covers the case where two idential data subscriptions are created.
+            // This covers the case where two identical data subscriptions are created.
             var dummy = qcAlgorithm.AddData(customDataType, asset.Symbol, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == SecurityType.Option).Single().DataTimeZone);
             var customData = qcAlgorithm.AddData(customDataType, asset.Symbol, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == SecurityType.Option).Single().DataTimeZone);
 
@@ -534,7 +534,7 @@ namespace QuantConnect.Tests.Algorithm
 
             // Dummy here is meant to try to corrupt the SymbolCache. Ideally, SymbolCache should return non-custom data types with higher priority
             // in case we want to add two custom data types, but still have them associated with the equity from the cache if we're using it.
-            // This covers the case where two idential data subscriptions are created.
+            // This covers the case where two identical data subscriptions are created.
             var dummy = qcAlgorithm.AddData(customDataType, ticker, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == SecurityType.Option).Single().DataTimeZone);
             var customData = qcAlgorithm.AddData(customDataType, ticker, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == SecurityType.Option).Single().DataTimeZone);
 
@@ -561,11 +561,11 @@ namespace QuantConnect.Tests.Algorithm
             var qcAlgorithm = new QCAlgorithm();
             qcAlgorithm.SubscriptionManager.SetDataManager(new DataManagerStub(qcAlgorithm));
 
-            var asset = qcAlgorithm.AddOption(ticker);
+            qcAlgorithm.AddOption(ticker);
 
             // Dummy here is meant to try to corrupt the SymbolCache. Ideally, SymbolCache should return non-custom data types with higher priority
             // in case we want to add two custom data types, but still have them associated with the equity from the cache if we're using it.
-            // This covers the case where two idential data subscriptions are created.
+            // This covers the case where two identical data subscriptions are created.
             var dummy = qcAlgorithm.AddData(customDataType, ticker, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == SecurityType.Option).Single().DataTimeZone);
             var customData = qcAlgorithm.AddData(customDataType, ticker, Resolution.Daily, qcAlgorithm.SubscriptionManager.Subscriptions.Where(x => x.SecurityType == SecurityType.Option).Single().DataTimeZone);
 
@@ -724,9 +724,86 @@ namespace QuantConnect.Tests.Algorithm
             Assert.IsTrue(exception.Message.Contains("is delisted"), $"Unexpected exception message: {exception.Message}");
         }
 
+        [TestCase(Resolution.Daily, Resolution.Minute, true)]
+        [TestCase(Resolution.Hour, Resolution.Minute, true)]
+        [TestCase(Resolution.Minute, Resolution.Minute, false)]
+        [TestCase(Resolution.Second, Resolution.Minute, false)]
+        public void AddOptionContractWarnsForCoarseUnderlyingResolution(
+            Resolution underlyingResolution, Resolution optionResolution, bool shouldWarn)
+        {
+            var algorithm = Algorithm();
+            var underlying = algorithm.AddEquity("SPY", underlyingResolution).Symbol;
+            var option = Symbol.CreateOption(underlying, Market.USA, OptionStyle.American, OptionRight.Call,
+                100m, new DateTime(2027, 1, 15));
+
+            Assert.DoesNotThrow(() => algorithm.AddOptionContract(option, optionResolution));
+
+            var warnings = algorithm.DebugMessages.Where(message => message.Contains("but its underlying")).ToList();
+            Assert.AreEqual(shouldWarn ? 1 : 0, warnings.Count);
+            if (shouldWarn)
+            {
+                StringAssert.Contains($"Add the underlying at {optionResolution} resolution or finer", warnings.Single());
+            }
+        }
+
+        [Test]
+        public void AddOptionContractUsesHighestAvailableUnderlyingResolution()
+        {
+            var algorithm = Algorithm();
+            var underlying = algorithm.AddEquity("SPY", Resolution.Daily).Symbol;
+            algorithm.AddEquity("SPY", Resolution.Minute);
+            var option = Symbol.CreateOption(underlying, Market.USA, OptionStyle.American, OptionRight.Call,
+                100m, new DateTime(2027, 1, 15));
+
+            Assert.DoesNotThrow(() => algorithm.AddOptionContract(option, Resolution.Minute));
+
+            Assert.IsFalse(algorithm.DebugMessages.Any(message => message.Contains("but its underlying")));
+        }
+
+        [TestCase(Resolution.Daily, Resolution.Minute, true)]
+        [TestCase(Resolution.Minute, Resolution.Minute, false)]
+        [TestCase(Resolution.Second, Resolution.Minute, false)]
+        public void AddOptionWarnsForCoarseUnderlyingResolution(
+            Resolution underlyingResolution, Resolution optionResolution, bool shouldWarn)
+        {
+            var algorithm = Algorithm();
+            algorithm.AddEquity("SPY", underlyingResolution);
+
+            Assert.DoesNotThrow(() => algorithm.AddOption("SPY", optionResolution));
+
+            Assert.AreEqual(shouldWarn ? 1 : 0, algorithm.DebugMessages.Count(message => message.Contains("but its underlying")));
+        }
+
+        [Test]
+        public void AddOptionDoesNotWarnWhenUnderlyingIsNotPresent()
+        {
+            var algorithm = Algorithm();
+
+            Assert.DoesNotThrow(() => algorithm.AddOption("SPY", Resolution.Minute));
+
+            Assert.IsFalse(algorithm.DebugMessages.Any(message => message.Contains("but its underlying")));
+        }
+
+        [Test]
+        public void AddOptionContractWarnsOnceForCoarseUnderlyingResolution()
+        {
+            var algorithm = Algorithm();
+            algorithm.UniverseSettings.Resolution = Resolution.Minute;
+            var underlying = algorithm.AddEquity("SPY", Resolution.Daily).Symbol;
+            var firstOption = Symbol.CreateOption(underlying, Market.USA, OptionStyle.American, OptionRight.Call,
+                100m, new DateTime(2027, 1, 15));
+            var secondOption = Symbol.CreateOption(underlying, Market.USA, OptionStyle.American, OptionRight.Put,
+                105m, new DateTime(2027, 1, 15));
+
+            Assert.DoesNotThrow(() => algorithm.AddOptionContract(firstOption));
+            Assert.DoesNotThrow(() => algorithm.AddOptionContract(secondOption));
+
+            Assert.AreEqual(1, algorithm.DebugMessages.Count(message => message.Contains("but its underlying")));
+        }
+
         private static SubscriptionDataConfig GetMatchingSubscription(QCAlgorithm algorithm, Symbol symbol, Type type)
         {
-            // find a subscription matchin the requested type with a higher resolution than requested
+            // find a subscription matching the requested type with a higher resolution than requested
             return algorithm.SubscriptionManager.SubscriptionDataConfigService
                 .GetSubscriptionDataConfigs(symbol)
                 .Where(config => type.IsAssignableFrom(config.Type))

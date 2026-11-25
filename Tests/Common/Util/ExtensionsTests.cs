@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -37,6 +38,7 @@ using QuantConnect.Data.Fundamental;
 using QuantConnect.Data.Market;
 using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Indicators;
+using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine.DataFeeds;
 using QuantConnect.Lean.Engine.HistoricalData;
 using QuantConnect.Orders;
@@ -46,6 +48,7 @@ using QuantConnect.Python;
 using QuantConnect.Scheduling;
 using QuantConnect.Securities;
 using QuantConnect.Tests.Brokerages;
+using QuantConnect.Tests.Engine.DataFeeds;
 using QuantConnect.Util;
 
 namespace QuantConnect.Tests.Common.Util
@@ -60,6 +63,138 @@ namespace QuantConnect.Tests.Common.Util
             var parsed = uint.Parse(saleCondition, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
             var enums = Extensions.GetFlags<TradeConditionFlags>(parsed).ToArray();
             Assert.AreEqual(expected, enums);
+        }
+
+        // GOOGL traded as GOOG until 2014-04-02 and as GOOGL from 2014-04-03, New York time
+        [TestCase("Pacific/Honolulu", "2014-04-03 08:00", false, false, "GOOGL", "GOOGL")]
+        [TestCase("Asia/Tokyo", "2014-04-02 16:00", false, false, "GOOG", "GOOG")]
+        [TestCase("America/New_York", "2014-04-03 14:00", false, false, "GOOG", "GOOGL")]
+        [TestCase("America/New_York", "2014-04-02 18:00", false, false, "GOOG", "GOOG")]
+        [TestCase("America/New_York", "2014-04-03 14:00", true, true, "GOOGL", "GOOGL")]
+        [TestCase("America/New_York", "2014-04-03 14:00", true, true, "GOOG", "GOOGL")]
+        public void GetOrAddUnrequestedSecurityMapsOptionsOnTheUnderlyingExchangesCurrentDate(string timeZone, string utcNow, bool liveMode,
+            bool warmingUp, string underlyingTicker, string expectedUnderlyingTicker)
+        {
+            // the map file provider is looked up in the composer, which another test can reset
+            if (Composer.Instance.GetPart<IMapFileProvider>() == null)
+            {
+                Composer.Instance.AddPart(TestGlobals.MapFileProvider);
+            }
+            SymbolCache.Clear();
+            try
+            {
+                var googl = Symbol.Create("GOOGL", SecurityType.Equity, Market.USA);
+                var currentGoog = Symbol.Create("GOOG", SecurityType.Equity, Market.USA);
+                var option = Symbol.CreateOption(new Symbol(googl.ID, underlyingTicker), Market.USA, OptionStyle.American, OptionRight.Call,
+                    100m, new DateTime(2050, 1, 21));
+
+                var algorithm = new AlgorithmStub();
+                algorithm.SetTimeZone(timeZone);
+                algorithm.SetLiveMode(liveMode);
+                algorithm.SetDateTime(Parse.DateTime(utcNow));
+                if (warmingUp)
+                {
+                    algorithm.SetWarmUp(TimeSpan.FromDays(1));
+                    algorithm.PostInitialize();
+                    Assert.IsTrue(algorithm.IsWarmingUp);
+                }
+                if (expectedUnderlyingTicker == "GOOGL")
+                {
+                    Assert.AreEqual(currentGoog.ID, algorithm.AddEquity("GOOG").Symbol.ID);
+                }
+
+                Assert.IsTrue(algorithm.GetOrAddUnrequestedSecurity(option, out var security));
+
+                Assert.AreEqual(option.ID, security.Symbol.ID);
+                Assert.AreEqual(googl.ID, security.Symbol.Underlying.ID);
+                Assert.AreEqual(expectedUnderlyingTicker, security.Symbol.Underlying.Value);
+                Assert.AreEqual(googl.ID, SymbolCache.GetSymbol(expectedUnderlyingTicker).ID);
+                if (expectedUnderlyingTicker == "GOOGL")
+                {
+                    // the old ticker still resolves to the security trading under it today
+                    Assert.AreEqual(currentGoog.ID, SymbolCache.GetSymbol("GOOG").ID);
+                    Assert.AreEqual(currentGoog.ID, algorithm.AddEquity("GOOG").Symbol.ID);
+                }
+            }
+            finally
+            {
+                SymbolCache.Clear();
+            }
+        }
+
+        [TestCase(1)]
+        [TestCase(2)]
+        [TestCase(6)]
+        public void GetConsumingEnumerableOrNullReturnsEveryItem(int count)
+        {
+            using var collection = new BlockingCollection<int>();
+            var expected = Enumerable.Range(0, count).ToList();
+            expected.ForEach(collection.Add);
+            collection.CompleteAdding();
+
+            var items = collection.GetConsumingEnumerableOrNull();
+
+            Assert.IsNotNull(items);
+            CollectionAssert.AreEqual(expected, items.ToList());
+        }
+
+        [Test]
+        public void GetConsumingEnumerableOrNullReturnsNullWhenCompletedWithoutItems()
+        {
+            using var collection = new BlockingCollection<int>();
+            collection.CompleteAdding();
+
+            Assert.IsNull(collection.GetConsumingEnumerableOrNull());
+        }
+
+        [Test]
+        public void GetConsumingEnumerableOrNullWaitsForTheProducer()
+        {
+            using var collection = new BlockingCollection<int>();
+            var producer = Task.Run(() =>
+            {
+                Thread.Sleep(100);
+                collection.Add(1);
+                Thread.Sleep(100);
+                collection.Add(2);
+                collection.Add(3);
+                collection.CompleteAdding();
+            });
+
+            var items = collection.GetConsumingEnumerableOrNull();
+
+            Assert.IsNotNull(items);
+            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, items.ToList());
+            Assert.IsTrue(producer.Wait(TimeSpan.FromSeconds(5)));
+        }
+
+        [Test]
+        public void GetConsumingEnumerableOrNullWaitsForTheProducerToCompleteWithoutItems()
+        {
+            using var collection = new BlockingCollection<int>();
+            var producer = Task.Run(() =>
+            {
+                Thread.Sleep(100);
+                collection.CompleteAdding();
+            });
+
+            Assert.IsNull(collection.GetConsumingEnumerableOrNull());
+            Assert.IsTrue(producer.Wait(TimeSpan.FromSeconds(5)));
+        }
+
+        [TestCase(Market.CME, DataMappingMode.OpenInterest, DataMappingMode.OpenInterest)]
+        [TestCase(Market.CME, DataMappingMode.OpenInterestAnnual, DataMappingMode.OpenInterestAnnual)]
+        [TestCase(Market.EUREX, DataMappingMode.OpenInterest, DataMappingMode.LastTradingDay)]
+        [TestCase(Market.HKFE, DataMappingMode.OpenInterest, DataMappingMode.LastTradingDay)]
+        [TestCase(Market.ICE, DataMappingMode.OpenInterest, DataMappingMode.LastTradingDay)]
+        [TestCase(Market.KRX, DataMappingMode.OpenInterest, DataMappingMode.LastTradingDay)]
+        [TestCase(Market.KRX, DataMappingMode.OpenInterestAnnual, DataMappingMode.LastTradingDay)]
+        [TestCase(Market.KRX, DataMappingMode.FirstDayMonth, DataMappingMode.FirstDayMonth)]
+        public void GetUniverseMappingModeOrDefault(string market, DataMappingMode settingsMode, DataMappingMode expected)
+        {
+            var settings = new UniverseSettings(Resolution.Daily, 1, true, false, TimeSpan.Zero) { DataMappingMode = settingsMode };
+
+            Assert.AreEqual(expected, settings.GetUniverseMappingModeOrDefault(SecurityType.Future, market));
         }
 
         [TestCase("tt", "", "tt")]
@@ -98,6 +233,43 @@ namespace QuantConnect.Tests.Common.Util
             if (count == 2)
             {
                 Assert.AreEqual(20, result[1].Property);
+            }
+        }
+
+        [Test]
+        public void EditorBrowsableNeverExtensionMethodsAreNotBoundToPythonInstances()
+        {
+            var order = new MarketOrder(Symbols.SPY, 100, DateTime.UtcNow);
+            var config = new SubscriptionDataConfig(typeof(TradeBar), Symbols.SPY, Resolution.Minute, TimeZones.NewYork,
+                TimeZones.NewYork, true, true, false);
+
+            using (Py.GIL())
+            {
+                var module = PyModule.FromString("testModule",
+                    @"
+from AlgorithmImports import *
+
+def check(symbol: Symbol, order: Order, config: SubscriptionDataConfig):
+    hidden = (hasattr(symbol, 'requires_mapping'), hasattr(order, 'try_get_contingent_orders'), hasattr(config, 'ticker_should_be_mapped'))
+    visible = (hasattr(order, 'is_contingent'), order.is_contingent(), OrderStatus.FILLED.is_open())
+    static_forms = (Extensions.requires_mapping(symbol), SubscriptionDataConfigExtensions.ticker_should_be_mapped(config))
+    return hidden, visible, static_forms
+");
+
+                dynamic check = module.GetAttr("check");
+                var result = check(Symbols.SPY, order, config);
+
+                // hidden extensions are not bound to the instance
+                Assert.IsFalse((bool)result[0][0]);
+                Assert.IsFalse((bool)result[0][1]);
+                Assert.IsFalse((bool)result[0][2]);
+                // the other extensions are
+                Assert.IsTrue((bool)result[1][0]);
+                Assert.IsFalse((bool)result[1][1]);
+                Assert.IsFalse((bool)result[1][2]);
+                // the static forms still work
+                Assert.AreEqual(Symbols.SPY.RequiresMapping(), (bool)result[2][0]);
+                Assert.AreEqual(config.TickerShouldBeMapped(), (bool)result[2][1]);
             }
         }
 
@@ -1018,7 +1190,7 @@ namespace QuantConnect.Tests.Common.Util
         }
 
         [Test]
-        public void ConvertsNegavtiveOneNumberDecimalFromString()
+        public void ConvertsNegativeOneNumberDecimalFromString()
         {
             const string input = "-1.45678";
             var value = input.ToDecimal();
@@ -1415,9 +1587,9 @@ class Test(PythonData):
             using (Py.GIL())
             {
                 var tradebarSelectorPyObject = Field.Volume.ToPython();
-                var quotebatSelectorPyObject = Field.BidClose.ToPython();
+                var quotebarSelectorPyObject = Field.BidClose.ToPython();
                 var tradebarResult = tradebarSelectorPyObject.TryAs<Func<IBaseData, decimal>>(out var tradebarCSharpSelector);
-                var quotebarResult = quotebatSelectorPyObject.TryAs<Func<IBaseData, decimal>>(out var quotebarCSharpSelector);
+                var quotebarResult = quotebarSelectorPyObject.TryAs<Func<IBaseData, decimal>>(out var quotebarCSharpSelector);
                 Assert.IsTrue(tradebarResult);
                 Assert.IsTrue(quotebarResult);
                 Assert.IsTrue(ReferenceEquals(Field.Volume, tradebarCSharpSelector));
@@ -1452,14 +1624,12 @@ class Test(PythonData):
         [Test]
         public void PyObjectTryConvertToNonDelegateFail()
         {
-            int action;
-
             using (Py.GIL())
             {
                 using var locals = new PyDict();
                 PythonEngine.Exec("def raise_number(a, b): raise ValueError(a * b)", null, locals);
                 var pyObject = locals.GetItem("raise_number");
-                Assert.IsFalse(pyObject.TryAs(out action));
+                Assert.IsFalse(pyObject.TryAs(out int _));
             }
         }
 

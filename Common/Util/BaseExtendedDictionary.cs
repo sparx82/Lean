@@ -16,10 +16,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using QuantConnect;
 using QuantConnect.Python;
 
-namespace Common.Util
+namespace QuantConnect.Util
 {
     /// <summary>
     /// Provides a generic implementation of ExtendedDictionary with specific dictionary type
@@ -245,6 +244,15 @@ namespace Common.Util
         /// </summary>
         /// <param name="dictionary">The dictionary whose elements are copied to the new dictionary</param>
         public BaseExtendedDictionary(IDictionary<TKey, TValue> dictionary) : base(new Dictionary<TKey, TValue>(dictionary))
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the BaseExtendedDictionary class using the specified dictionary
+        /// </summary>
+        /// <param name="dictionary">The dictionary to use as the data source</param>
+        /// <param name="copy">True to copy the elements into a new dictionary, false to wrap the given instance so that any changes made to it are reflected</param>
+        public BaseExtendedDictionary(Dictionary<TKey, TValue> dictionary, bool copy) : base(copy ? new Dictionary<TKey, TValue>(dictionary) : dictionary)
         {
         }
 

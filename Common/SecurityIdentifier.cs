@@ -313,7 +313,7 @@ namespace QuantConnect
         /// </summary>
         /// <param name="symbol">The base36 string encoded as a long using alpha [0-9A-Z]</param>
         /// <param name="properties">Other data defining properties of the symbol including market,
-        /// security type, listing or expiry date, strike/call/put/style for options, ect...</param>
+        /// security type, listing or expiry date, strike/call/put/style for options, etc...</param>
         public SecurityIdentifier(string symbol, ulong properties)
         {
             if (symbol == null)
@@ -336,7 +336,7 @@ namespace QuantConnect
             {
                 throw new ArgumentException(Messages.SecurityIdentifier.PropertiesDoNotMatchAnySecurityType, nameof(properties));
             }
-            _hashCode = Math.Abs(unchecked (symbol.GetHashCode() * 397) ^ properties.GetHashCode());
+            _hashCode = unchecked (symbol.GetHashCode() * 397) ^ properties.GetHashCode();
             _hashCodeSet = true;
         }
 
@@ -345,7 +345,7 @@ namespace QuantConnect
         /// </summary>
         /// <param name="symbol">The base36 string encoded as a long using alpha [0-9A-Z]</param>
         /// <param name="properties">Other data defining properties of the symbol including market,
-        /// security type, listing or expiry date, strike/call/put/style for options, ect...</param>
+        /// security type, listing or expiry date, strike/call/put/style for options, etc...</param>
         /// <param name="underlying">Specifies a <see cref="SecurityIdentifier"/> that represents the underlying security</param>
         public SecurityIdentifier(string symbol, ulong properties, SecurityIdentifier underlying)
             : this(symbol, properties)
@@ -831,8 +831,7 @@ namespace QuantConnect
         /// <returns>True on success, otherwise false</returns>
         public static bool TryParse(string value, out SecurityIdentifier identifier)
         {
-            Exception exception;
-            return TryParse(value, out identifier, out exception);
+            return TryParse(value, out identifier, out _);
         }
 
         /// <summary>
@@ -1060,7 +1059,7 @@ namespace QuantConnect
         {
             if (!_hashCodeSet)
             {
-                _hashCode = Math.Abs(unchecked(_symbol.GetHashCode() * 397) ^ _properties.GetHashCode());
+                _hashCode = unchecked(_symbol.GetHashCode() * 397) ^ _properties.GetHashCode();
                 _hashCodeSet = true;
             }
             return _hashCode;

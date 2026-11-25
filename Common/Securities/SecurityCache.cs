@@ -38,6 +38,7 @@ namespace QuantConnect.Securities
         // this is used to prefer quote bar data over the tradebar data
         private DateTime _lastQuoteBarUpdate;
         private DateTime _lastOHLCUpdate;
+        private DateTime _lastOpenInterestUpdate;
         private BaseData _lastData;
 
         private readonly object _locker = new();
@@ -198,6 +199,7 @@ namespace QuantConnect.Securities
                     StoreDataPoint(data);
                 }
                 OpenInterest = (long)tick.Value;
+                _lastOpenInterestUpdate = tick.EndTime;
 
                 // Update the session with the latest open interest
                 Session?.Update(data);
@@ -325,12 +327,16 @@ namespace QuantConnect.Securities
         /// Helper method to update the open interest cache property from a chain universe data point,
         /// which carries the contracts daily open interest
         /// </summary>
+        /// <remarks>The chain universe data is skipped if a more recent open interest value was already received,
+        /// for example in live trading, where the open interest ticks of the day arrive before the previous
+        /// tradable date's chain universe file is fed into the algorithm</remarks>
         /// <param name="data">The data point being stored</param>
         protected void UpdateOpenInterest(BaseData data)
         {
-            if (data is BaseChainUniverseData chainUniverseData)
+            if (data is BaseChainUniverseData chainUniverseData && chainUniverseData.EndTime > _lastOpenInterestUpdate)
             {
                 OpenInterest = (long)chainUniverseData.OpenInterest;
+                _lastOpenInterestUpdate = chainUniverseData.EndTime;
             }
         }
 
@@ -455,6 +461,7 @@ namespace QuantConnect.Securities
 
             _lastOHLCUpdate = default;
             _lastQuoteBarUpdate = default;
+            _lastOpenInterestUpdate = default;
             Session?.Reset();
             UnsubscribeToTimeUpdatedEvent();
         }
@@ -631,6 +638,29 @@ namespace QuantConnect.Securities
             _dataByType?.Values.DoForEach(x => x.DoForEach(scale));
             _lastTickQuotes.DoForEach(scale);
             _lastTickTrades.DoForEach(scale);
+        }
+
+        /// <summary>
+        /// Applies the cash dividend to the security cache values, the distribution is paid out of the price
+        /// </summary>
+        internal void ApplyDividend(Dividend dividend)
+        {
+            // a distribution larger than the last price takes it to zero, never below
+            decimal Adjust(decimal price) => Math.Max(0, price - dividend.Distribution);
+
+            Price = Adjust(Price);
+            Open = Adjust(Open);
+            High = Adjust(High);
+            Low = Adjust(Low);
+            Close = Adjust(Close);
+            BidPrice = Adjust(BidPrice);
+            AskPrice = Adjust(AskPrice);
+
+            // Adjust values for the last data we have cached
+            Action<BaseData> adjust = data => data.Scale((target, _, _) => Adjust(target), 1, 1, decimal.Zero);
+            _dataByType?.Values.DoForEach(dataPoints => dataPoints.DoForEach(adjust));
+            _lastTickQuotes.DoForEach(adjust);
+            _lastTickTrades.DoForEach(adjust);
         }
     }
 }

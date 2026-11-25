@@ -52,7 +52,7 @@ namespace QuantConnect.Tests.Algorithm
         private NullDataFeed _dataFeed;
 
         /// <summary>
-        /// Instatiate a new algorithm before each test.
+        /// Instantiate a new algorithm before each test.
         /// Clear the <see cref="SymbolCache"/> so that no symbols and associated brokerage models are cached between test
         /// </summary>
         [SetUp]
@@ -145,6 +145,143 @@ namespace QuantConnect.Tests.Algorithm
             Assert.Greater(nonUniverseSubscriptions.Count, 0);
             Assert.That(nonUniverseSubscriptions.Select(x => x.ExtendedMarketHours),
                 Has.All.EqualTo(extendedMarketHours));
+        }
+
+        [TestCase("KM", Market.KRX, null, DataMappingMode.LastTradingDay, true)]
+        [TestCase("FESX", Market.EUREX, null, DataMappingMode.LastTradingDay, true)]
+        [TestCase("ES", Market.CME, null, DataMappingMode.OpenInterest, false)]
+        [TestCase("KM", Market.KRX, DataMappingMode.OpenInterest, DataMappingMode.LastTradingDay, true)]
+        [TestCase("FESX", Market.EUREX, DataMappingMode.OpenInterest, DataMappingMode.LastTradingDay, true)]
+        [TestCase("FESX", Market.EUREX, DataMappingMode.OpenInterestAnnual, DataMappingMode.LastTradingDay, true)]
+        [TestCase("FESX", Market.EUREX, DataMappingMode.FirstDayMonth, DataMappingMode.FirstDayMonth, false)]
+        [TestCase("ES", Market.CME, DataMappingMode.OpenInterest, DataMappingMode.OpenInterest, false)]
+        public void AddFutureFallsBackFromUnavailableDataMappingMode(string ticker, string market, DataMappingMode? dataMappingMode,
+            DataMappingMode expectedMode, bool expectWarning)
+        {
+            var future = _algo.AddFuture(ticker, Resolution.Daily, market, dataMappingMode: dataMappingMode);
+
+            var continuousConfigs = _algo.SubscriptionManager.SubscriptionDataConfigService
+                .GetSubscriptionDataConfigs(future.Symbol, includeInternalConfigs: true)
+                .Where(x => x.Type != typeof(FutureUniverse))
+                .ToList();
+            Assert.Greater(continuousConfigs.Count, 0);
+            Assert.That(continuousConfigs.Select(x => x.DataMappingMode), Has.All.EqualTo(expectedMode));
+
+            var warnings = _algo.DebugMessages.Where(x => x.Contains("data mapping mode is not available")).ToList();
+            if (expectWarning)
+            {
+                Assert.AreEqual(1, warnings.Count);
+                var requestedMode = dataMappingMode ?? DataMappingMode.OpenInterest;
+                Assert.That(warnings[0], Does.EndWith($"Warning: {requestedMode} data mapping mode is not available for {market.ToUpperInvariant()} futures, using LastTradingDay instead."));
+            }
+            else
+            {
+                Assert.IsEmpty(warnings);
+            }
+        }
+
+        [Test]
+        public void AddFutureDataMappingModeFallbackWarnsOncePerMarket()
+        {
+            _algo.AddFuture("FESX", Resolution.Daily, Market.EUREX, dataMappingMode: DataMappingMode.OpenInterest);
+            _algo.AddFuture("FDAX", Resolution.Daily, Market.EUREX);
+            _algo.AddFuture("HSI", Resolution.Daily, Market.HKFE, dataMappingMode: DataMappingMode.OpenInterest);
+            _algo.AddFuture("KM", Resolution.Daily, Market.KRX);
+
+            var warnings = _algo.DebugMessages.Where(x => x.Contains("data mapping mode is not available")).ToList();
+            Assert.AreEqual(3, warnings.Count);
+            Assert.That(warnings[0], Does.EndWith("Warning: OpenInterest data mapping mode is not available for EUREX futures, using LastTradingDay instead."));
+            Assert.That(warnings[1], Does.EndWith("Warning: OpenInterest data mapping mode is not available for HKFE futures, using LastTradingDay instead."));
+            Assert.That(warnings[2], Does.EndWith("Warning: OpenInterest data mapping mode is not available for KRX futures, using LastTradingDay instead."));
+        }
+
+        [Test]
+        public void AddFutureFallsBackToUniverseSettingsDataMappingMode()
+        {
+            _algo.UniverseSettings.DataMappingMode = DataMappingMode.FirstDayMonth;
+            var future = _algo.AddFuture("FESX", Resolution.Daily, Market.EUREX, dataMappingMode: DataMappingMode.OpenInterest);
+
+            var continuousConfigs = _algo.SubscriptionManager.SubscriptionDataConfigService
+                .GetSubscriptionDataConfigs(future.Symbol, includeInternalConfigs: true)
+                .Where(x => x.Type != typeof(FutureUniverse))
+                .ToList();
+            Assert.That(continuousConfigs.Select(x => x.DataMappingMode), Has.All.EqualTo(DataMappingMode.FirstDayMonth));
+            Assert.That(_algo.DebugMessages.Single(x => x.Contains("data mapping mode is not available")),
+                Does.EndWith("Warning: OpenInterest data mapping mode is not available for EUREX futures, using FirstDayMonth instead."));
+        }
+
+        [Test]
+        public void AddFutureAfterRemovingItAppliesNewSettings()
+        {
+            var future = _algo.AddFuture(Futures.Indices.SP500EMini, Resolution.Daily, dataMappingMode: DataMappingMode.OpenInterest);
+            _algo.RemoveSecurity(future.Symbol);
+            future = _algo.AddFuture(Futures.Indices.SP500EMini, Resolution.Daily, dataMappingMode: DataMappingMode.LastTradingDay);
+
+            var continuousUniverse = _algo.UniverseManager[ContinuousContractUniverse.CreateSymbol(future.Symbol)];
+            Assert.AreEqual(DataMappingMode.LastTradingDay, continuousUniverse.UniverseSettings.DataMappingMode);
+            Assert.IsFalse(_algo.DebugMessages.Any(x => x.Contains("already added")));
+        }
+
+        [Test]
+        public void AddFutureAgainWithDifferentSettingsWarnsOnce()
+        {
+            var future = _algo.AddFuture(Futures.Indices.SP500EMini, Resolution.Daily, dataMappingMode: DataMappingMode.OpenInterest);
+            _algo.AddFuture(Futures.Indices.SP500EMini, Resolution.Daily, dataMappingMode: DataMappingMode.LastTradingDay);
+            _algo.AddFuture(Futures.Indices.SP500EMini, Resolution.Daily, dataMappingMode: DataMappingMode.FirstDayMonth);
+
+            var continuousConfigs = _algo.SubscriptionManager.SubscriptionDataConfigService
+                .GetSubscriptionDataConfigs(future.Symbol, includeInternalConfigs: true)
+                .Where(x => x.Type != typeof(FutureUniverse))
+                .ToList();
+            Assert.That(continuousConfigs.Select(x => x.DataMappingMode), Has.All.EqualTo(DataMappingMode.OpenInterest));
+
+            var warnings = _algo.DebugMessages.Where(x => x.Contains("already added")).ToList();
+            Assert.AreEqual(1, warnings.Count);
+            Assert.That(warnings[0], Does.EndWith("Warning: /ES already added, ignoring data mapping mode LastTradingDay. Add it once, or remove and re-add it after Initialize."));
+        }
+
+        [Test]
+        public void AddFutureAgainWithAllSettingsDifferentListsThemInOneWarning()
+        {
+            _algo.AddFuture(Futures.Indices.SP500EMini, Resolution.Daily);
+            _algo.AddFuture(Futures.Indices.SP500EMini, Resolution.Daily, dataMappingMode: DataMappingMode.LastTradingDay,
+                dataNormalizationMode: DataNormalizationMode.Raw, contractDepthOffset: 1);
+
+            var warnings = _algo.DebugMessages.Where(x => x.Contains("already added")).ToList();
+            Assert.AreEqual(1, warnings.Count);
+            Assert.That(warnings[0], Does.EndWith("Warning: /ES already added, ignoring data mapping mode LastTradingDay, normalization mode Raw, contract depth offset 1. " +
+                "Add it once, or remove and re-add it after Initialize."));
+        }
+
+        [Test]
+        public void AddFutureAgainAfterInitializeWarnsToRemoveItFirst()
+        {
+            _algo.AddFuture(Futures.Indices.SP500EMini, Resolution.Daily, dataMappingMode: DataMappingMode.OpenInterest);
+            _algo.SetLocked();
+            _algo.AddFuture(Futures.Indices.SP500EMini, Resolution.Daily, dataMappingMode: DataMappingMode.LastTradingDay);
+
+            Assert.That(_algo.DebugMessages.Single(x => x.Contains("already added")),
+                Does.EndWith("Warning: /ES already added, ignoring data mapping mode LastTradingDay. Remove it first to change its settings."));
+        }
+
+        [TestCase(null)]
+        [TestCase(DataMappingMode.OpenInterest)]
+        public void AddFutureAgainWithSameSettingsDoesNotWarn(DataMappingMode? dataMappingMode)
+        {
+            _algo.AddFuture(Futures.Indices.SP500EMini, Resolution.Daily, dataMappingMode: DataMappingMode.OpenInterest);
+            _algo.AddFuture(Futures.Indices.SP500EMini, Resolution.Daily, dataMappingMode: dataMappingMode);
+
+            Assert.IsFalse(_algo.DebugMessages.Any(x => x.Contains("already added")));
+        }
+
+        [Test]
+        public void AddFutureAgainWithUnavailableDataMappingModeResolvingToSameModeDoesNotWarn()
+        {
+            _algo.AddFuture("FESX", Resolution.Daily, Market.EUREX);
+            _algo.AddFuture("FESX", Resolution.Daily, Market.EUREX, dataMappingMode: DataMappingMode.OpenInterest);
+
+            Assert.IsFalse(_algo.DebugMessages.Any(x => x.Contains("already added")));
+            Assert.AreEqual(1, _algo.DebugMessages.Count(x => x.Contains("data mapping mode is not available")));
         }
 
         [TestCaseSource(nameof(FuturesTestCases))]
@@ -317,7 +454,7 @@ namespace QuantConnect.Tests.Algorithm
                 var funcInitializer2CallCount = 0;
                 algorithm.AddSecurityInitializer((_) => funcInitializer2CallCount++);
 
-                var security = algorithm.AddEquity("SPY");
+                algorithm.AddEquity("SPY");
                 Assert.AreEqual(1, classInitializer1.CallCount);
                 Assert.AreEqual(1, classInitializer2.CallCount);
                 Assert.AreEqual(1, funcInitializer1CallCount);
@@ -361,7 +498,7 @@ def func_security_initializer2(security):
 
                 Assert.IsInstanceOf<CompositeSecurityInitializer>(algorithm.SecurityInitializer);
 
-                var security = algorithm.AddEquity("SPY");
+                algorithm.AddEquity("SPY");
 
                 using var classInitializer1 = module.GetAttr("class_initializer1");
                 var classInitializer1CallCount = classInitializer1.GetAttr("call_count").GetAndDispose<int>();
@@ -449,7 +586,7 @@ def set_security_initializer(algorithm):
                 var funcInitializer2CallCount = 0;
                 algorithm.AddSecurityInitializer((_) => funcInitializer2CallCount++);
 
-                var security = algorithm.AddEquity("SPY");
+                algorithm.AddEquity("SPY");
                 Assert.AreEqual(1, classInitializer1.CallCount);
                 Assert.AreEqual(1, classInitializer2.CallCount);
                 Assert.AreEqual(1, funcInitializer1CallCount);
@@ -501,7 +638,7 @@ def func_security_initializer2(security):
 
                 Assert.IsInstanceOf<CompositeSecurityInitializer>(algorithm.SecurityInitializer);
 
-                var security = algorithm.AddEquity("SPY");
+                algorithm.AddEquity("SPY");
 
                 using var classInitializer1 = module.GetAttr("class_initializer1");
                 var classInitializer1CallCount = classInitializer1.GetAttr("call_count").GetAndDispose<int>();
@@ -521,7 +658,7 @@ def func_security_initializer2(security):
 
         [TestCase(Language.CSharp)]
         [TestCase(Language.Python)]
-        public void SetBrokerageModelAppendsSecurityIntializerAfterAddSecurityInitializer(Language language)
+        public void SetBrokerageModelAppendsSecurityInitializerAfterAddSecurityInitializer(Language language)
         {
             var algorithm = new AlgorithmStub();
 
@@ -550,7 +687,7 @@ def func_security_initializer2(security):
             else
             {
                 using var _ = Py.GIL();
-                using var module = PyModule.FromString("SetBrokerageModelAppendsSecurityIntializerAfterAddSecurityInitializer", @"
+                using var module = PyModule.FromString("SetBrokerageModelAppendsSecurityInitializerAfterAddSecurityInitializer", @"
 from QuantConnect.Tests.Algorithm import AlgorithmAddSecurityTests
 
 class TestCustomSecurityInitializer:

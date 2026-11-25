@@ -332,7 +332,7 @@ namespace QuantConnect.Tests.Algorithm.Framework.Portfolio
             Assert.IsTrue(result);
             var target = portfolioTargets[0];
             var targetQuantity = (int)PortfolioTarget.Percent(algorithm, target.Symbol, target.Quantity).Quantity;
-            // The quantites can differ by one because of the number of lots for certain securities
+            // The quantities can differ by one because of the number of lots for certain securities
             Assert.AreEqual(quantity, targetQuantity, 1);
         }
 
@@ -469,6 +469,8 @@ namespace QuantConnect.Tests.Algorithm.Framework.Portfolio
         private static object[] SendsTargetsToCollective2AppropriatelyTestCases =
         {
             new object[] { "USD", Symbols.SPY, 0.2m, @"{""StrategyId"":0,""Positions"":[{""exchangeSymbol"":{""symbol"":""SPY"",""currency"":""USD"",""securityExchange"":""DEFAULT"",""securityType"":""CS""},""quantity"":2992.0}]}" },
+            // A renamed equity is sent under its current ticker, not the one in its SecurityIdentifier (GOOCV)
+            new object[] { "USD", Symbols.GOOG, 0.2m, @"{""StrategyId"":0,""Positions"":[{""exchangeSymbol"":{""symbol"":""GOOG"",""currency"":""USD"",""securityExchange"":""DEFAULT"",""securityType"":""CS""},""quantity"":2992.0}]}" },
             new object[] { "USD", Symbols.EURUSD, 1m, @"{""StrategyId"":0,""Positions"":[{""exchangeSymbol"":{""symbol"":""EUR/USD"",""currency"":""USD"",""securityExchange"":""DEFAULT"",""securityType"":""FOR""},""quantity"":1.0}]}" },
             new object[] { "USD", Symbols.EURGBP, 1m, @"{""StrategyId"":0,""Positions"":[{""exchangeSymbol"":{""symbol"":""EUR/GBP"",""currency"":""USD"",""securityExchange"":""DEFAULT"",""securityType"":""FOR""},""quantity"":1.0}]}" },
             new object[] { "USD", Symbols.GBPJPY, 1m, @"{""StrategyId"":0,""Positions"":[{""exchangeSymbol"":{""symbol"":""GBP/JPY"",""currency"":""USD"",""securityExchange"":""DEFAULT"",""securityType"":""FOR""},""quantity"":1.0}]}" },

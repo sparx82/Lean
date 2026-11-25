@@ -37,6 +37,11 @@ namespace QuantConnect.Data
         private TimeSpan? _barSpan;
 
         /// <summary>
+        /// The symbol the consolidator was registered for
+        /// </summary>
+        public Symbol Symbol { get; }
+
+        /// <summary>
         /// True if this consolidator has been removed
         /// </summary>
         public bool Disposed { get; private set; }
@@ -54,9 +59,11 @@ namespace QuantConnect.Data
         /// <summary>
         /// Creates a new instance
         /// </summary>
-        public ConsolidatorWrapper(IDataConsolidator consolidator, TimeSpan configIncrement, ITimeKeeper timeKeeper, LocalTimeKeeper localTimeKeeper)
+        public ConsolidatorWrapper(Symbol symbol, IDataConsolidator consolidator, TimeSpan configIncrement, ITimeKeeper timeKeeper, LocalTimeKeeper localTimeKeeper)
         {
             _id = Interlocked.Increment(ref _counter);
+
+            Symbol = symbol;
 
             _timeKeeper = timeKeeper;
             _consolidator = consolidator;
@@ -124,10 +131,10 @@ namespace QuantConnect.Data
                 }
                 else
                 {
-                    var pontetialEndTime = _consolidator.WorkingData.EndTime.ConvertToUtc(_localTimeKeeper.TimeZone);
-                    if (pontetialEndTime > _timeKeeper.UtcTime)
+                    var potentialEndTime = _consolidator.WorkingData.EndTime.ConvertToUtc(_localTimeKeeper.TimeZone);
+                    if (potentialEndTime > _timeKeeper.UtcTime)
                     {
-                        UtcScanTime = pontetialEndTime;
+                        UtcScanTime = potentialEndTime;
                     }
                     else
                     {

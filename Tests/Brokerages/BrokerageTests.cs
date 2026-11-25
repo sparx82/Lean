@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -131,8 +132,32 @@ namespace QuantConnect.Tests.Brokerages
             }
             brokerage.OrdersStatusChanged += HandleEvents;
             brokerage.OrderIdChanged += HandleOrderIdChangedEvents;
+            brokerage.OrderUpdated += HandleOrderUpdatedEvents;
 
             return brokerage;
+        }
+
+        /// <summary>
+        /// Applies the brokerage updates of the orders the way the transaction handler does: contingent orders held waiting
+        /// for their parent are released, and an order the brokerage resized takes the new quantity
+        /// </summary>
+        private void HandleOrderUpdatedEvents(object _, OrderUpdateEvent orderUpdateEvent)
+        {
+            var order = OrderProvider.GetOrderById(orderUpdateEvent.OrderId);
+            if (orderUpdateEvent.ContingencyTriggered && order?.GetContingencyLink(ContingencyRole.Child) is { } child)
+            {
+                child.Triggered = true;
+            }
+            if (orderUpdateEvent.Quantity.HasValue && order != null)
+            {
+                // the transaction handler drops a zero quantity, a change of side and a quantity under what already filled
+                var quantity = orderUpdateEvent.Quantity.Value;
+                var filledQuantity = OrderProvider.GetOrderTicket(order.Id)?.QuantityFilled ?? 0;
+                if (quantity != 0 && quantity != order.Quantity && Math.Sign(quantity) == Math.Sign(order.Quantity) && Math.Abs(quantity) >= Math.Abs(filledQuantity))
+                {
+                    order.Quantity = quantity;
+                }
+            }
         }
 
         /// <summary>
@@ -159,7 +184,7 @@ namespace QuantConnect.Tests.Brokerages
             foreach (var orderEvent in orderEvents)
             {
                 var order = _orderProvider.GetOrderById(orderEvent.OrderId);
-                order.Status = orderEvent.Status;
+                OrderProvider.HandleOrderEvent(orderEvent);
 
                 Log.Trace("");
                 Log.Trace($"ORDER STATUS CHANGED: {orderEvent}, Type: {order.Type}");
@@ -234,6 +259,7 @@ namespace QuantConnect.Tests.Brokerages
         {
             brokerage.OrdersStatusChanged -= HandleEvents;
             brokerage.OrderIdChanged -= HandleOrderIdChangedEvents;
+            brokerage.OrderUpdated -= HandleOrderUpdatedEvents;
             brokerage.Disconnect();
             brokerage.DisposeSafely();
         }
@@ -275,7 +301,6 @@ namespace QuantConnect.Tests.Brokerages
             Log.Trace("");
             Log.Trace("GET OPEN ORDERS");
             Log.Trace("");
-            var orders = new List<Order>();
             foreach (var openOrder in Brokerage.GetOpenOrders())
             {
                 var leanOrders = OrderProvider.GetOrdersByBrokerageId(openOrder.BrokerId.FirstOrDefault());
@@ -423,7 +448,7 @@ namespace QuantConnect.Tests.Brokerages
             Log.Trace("");
             Log.Trace("LONG FROM SHORT");
             Log.Trace("");
-            // first fo short
+            // first go short
             PlaceOrderWaitForStatus(parameters.CreateShortMarketOrder(-GetDefaultQuantity()), OrderStatus.Filled);
 
             // now go long
@@ -548,6 +573,121 @@ namespace QuantConnect.Tests.Brokerages
             }
 
             Brokerage.OrdersStatusChanged -= brokerageOnOrdersStatusChanged;
+        }
+
+        /// <summary>
+        /// Places a set of resting contingent orders: all of them are working, the ones triggered by another held.
+        /// Canceling the first order cancels the orders it triggers too. Whether the rest of its group is canceled depends on the brokerage
+        /// </summary>
+        public virtual void ContingentOrdersCancel(ContingentOrderTestParameters parameters)
+        {
+            var orders = PlaceOrderWaitForStatus(parameters.CreateOrders(GetDefaultQuantity()), OrderStatus.Submitted);
+            Assert.IsTrue(orders.All(order => order.GetContingencyLink(ContingencyRole.Child) == null || order.IsWaitingForTrigger()), "The triggered orders should be held");
+
+            var first = orders.First();
+            var canceledOrders = first.GetContingentDescendants(orders).Append(first).ToList();
+            Assert.IsTrue(Brokerage.CancelOrder(first), $"Brokerage failed to cancel the order: {first}");
+            WaitForOrders(() => canceledOrders.All(order => order.Status == OrderStatus.Canceled), "the order and the orders it triggers canceled");
+        }
+
+        /// <summary>
+        /// Places a set of resting contingent orders and updates each of them unchanged, the held ones included: the brokerage accepts the updates
+        /// </summary>
+        public virtual void ContingentOrdersUpdate(ContingentOrderTestParameters parameters)
+        {
+            var orders = PlaceOrderWaitForStatus(parameters.CreateOrders(GetDefaultQuantity()), OrderStatus.Submitted);
+
+            var updatedOrderIds = new HashSet<int>();
+            EventHandler<List<OrderEvent>> onOrdersStatusChanged = (_, orderEvents) =>
+            {
+                lock (updatedOrderIds)
+                {
+                    updatedOrderIds.UnionWith(orderEvents.Where(orderEvent => orderEvent.Status == OrderStatus.UpdateSubmitted).Select(orderEvent => orderEvent.OrderId));
+                }
+            };
+            Brokerage.OrdersStatusChanged += onOrdersStatusChanged;
+            try
+            {
+                foreach (var order in orders)
+                {
+                    Assert.IsTrue(Brokerage.UpdateOrder(order), $"Brokerage failed to update the order: {order}");
+                }
+                WaitForOrders(() =>
+                {
+                    lock (updatedOrderIds)
+                    {
+                        return orders.All(order => updatedOrderIds.Contains(order.Id));
+                    }
+                }, "all the updates submitted");
+            }
+            finally
+            {
+                Brokerage.OrdersStatusChanged -= onOrdersStatusChanged;
+            }
+            Assert.IsTrue(orders.All(order => order.Status != OrderStatus.Invalid), "No update should be rejected");
+        }
+
+        /// <summary>
+        /// Places a set of resting contingent orders: the brokerage open orders are rebuilt with the same contingencies,
+        /// like when an algorithm is deployed with existing open orders
+        /// </summary>
+        public virtual void ContingentOrdersGetOpenOrders(ContingentOrderTestParameters parameters)
+        {
+            var orders = PlaceOrderWaitForStatus(parameters.CreateOrders(GetDefaultQuantity()), OrderStatus.Submitted);
+
+            var openOrders = Brokerage.GetOpenOrders();
+            // the legs of a combo order share the brokerage id
+            var rebuiltOrders = orders.Select(order => openOrders.SingleOrDefault(openOrder => openOrder.BrokerId.Contains(order.BrokerId[0]) && openOrder.Symbol == order.Symbol)).ToList();
+            Assert.IsTrue(rebuiltOrders.All(order => order?.Contingency != null),
+                $"Every order should be rebuilt with its contingency: [{string.Join(", ", rebuiltOrders.Select(order => order == null ? "missing" : $"{order}: {order.Contingency}"))}]");
+            Assert.IsTrue(rebuiltOrders.All(order => ReferenceEquals(order.Contingency.OrderIds, rebuiltOrders[0].Contingency.OrderIds) && order.Contingency.Count == orders.Count),
+                "The rebuilt orders should share a single set");
+
+            foreach (var (order, rebuiltOrder) in orders.Zip(rebuiltOrders))
+            {
+                CollectionAssert.AreEquivalent(order.Contingency.Links.Select(link => (link.Type, link.Role)), rebuiltOrder.Contingency.Links.Select(link => (link.Type, link.Role)),
+                    $"The rebuilt links of {order}");
+                Assert.AreEqual(order.IsWaitingForTrigger(), rebuiltOrder.IsWaitingForTrigger(), $"The rebuilt order should be held as {order}");
+            }
+        }
+
+        /// <summary>
+        /// Places a set of contingent orders where the first order fills right away, like a market entry:
+        /// the orders it triggers are released and working
+        /// </summary>
+        public virtual void ContingentOrdersTrigger(ContingentOrderTestParameters parameters)
+        {
+            var orders = parameters.CreateOrders(GetDefaultQuantity());
+            foreach (var order in orders)
+            {
+                OrderProvider.Add(order);
+                Assert.IsTrue(Brokerage.PlaceOrder(order), $"Brokerage failed to place the order: {order}");
+            }
+            var children = orders[0].GetContingentChildren(orders).ToList();
+            WaitForOrders(() => orders[0].Status == OrderStatus.Filled
+                && children.All(child => !child.IsWaitingForTrigger() && child.Status is OrderStatus.Submitted or OrderStatus.UpdateSubmitted),
+                "the first order filled and the orders it triggers working");
+
+            // the triggered orders are canceled before the position is closed on tear down: some brokerages reserve the position for
+            // the working exit orders until they are canceled. Canceling one can cancel the others, like the siblings of a bracket
+            foreach (var child in children.Where(child => child.Status.IsOpen()))
+            {
+                Brokerage.CancelOrder(child);
+            }
+            WaitForOrders(() => children.All(child => child.Status == OrderStatus.Canceled), "the triggered orders canceled");
+        }
+
+        /// <summary>
+        /// Waits until the given condition on the orders, kept up to date through the brokerage events, is met
+        /// </summary>
+        protected static void WaitForOrders(Func<bool> condition, string description, double secondsTimeout = 30)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            while (!condition() && stopwatch.Elapsed.TotalSeconds < secondsTimeout)
+            {
+                Thread.Sleep(100);
+            }
+            Assert.IsTrue(condition(), $"Timed out waiting for {description}");
         }
 
         [Test]
@@ -722,12 +862,17 @@ namespace QuantConnect.Tests.Brokerages
         {
             using var requiredStatusEvent = new ManualResetEvent(false);
             using var desiredStatusEvent = new ManualResetEvent(false);
+            var invalidOrderEvents = new ConcurrentQueue<OrderEvent>();
             EventHandler<List<OrderEvent>> brokerageOnOrdersStatusChanged = (sender, orderEvents) =>
             {
                 foreach (var orderEvent in orderEvents)
                 {
                     var order = _orderProvider.GetOrderById(orderEvent.OrderId);
                     order.Status = orderEvent.Status;
+                    if (orderEvent.Status == OrderStatus.Invalid)
+                    {
+                        invalidOrderEvents.Enqueue(orderEvent);
+                    }
                     // no matter what, every order should fire at least one of these
                     if (orders.All(o => o.Status is OrderStatus.Submitted or OrderStatus.Invalid))
                     {
@@ -761,40 +906,58 @@ namespace QuantConnect.Tests.Brokerages
 
             Brokerage.OrdersStatusChanged += brokerageOnOrdersStatusChanged;
 
-            OrderFillEvent.Reset();
-
-            foreach (var order in orders)
+            try
             {
-                OrderProvider.Add(order);
-                if (!Brokerage.PlaceOrder(order) && !allowFailedSubmission)
+                OrderFillEvent.Reset();
+
+                foreach (var order in orders)
                 {
-                    Assert.Fail("Brokerage failed to place the order: " + orders);
+                    OrderProvider.Add(order);
+                    if (!Brokerage.PlaceOrder(order) && !allowFailedSubmission)
+                    {
+                        Assert.Fail($"Brokerage failed to place the order: {order}");
+                    }
+                }
+
+                // This is due to IB simulating stop orders https://www.interactivebrokers.com/en/trading/orders/stop.php
+                // which causes the Status.Submitted order event to never be set
+                var assertOrderEventStatus = true;
+                if (Brokerage.Name == "Interactive Brokers Brokerage" && orders.Any(o => o.Type is OrderType.StopMarket or OrderType.StopLimit))
+                {
+                    assertOrderEventStatus = false;
+                }
+
+                var delayMilliseconds = Convert.ToInt32(1000 * secondsTimeout);
+                if (assertOrderEventStatus)
+                {
+                    if (requiredStatusEvent.WaitOneAssertFail(delayMilliseconds, "Expected every order to fire a submitted or invalid status event"))
+                    {
+                        if (!desiredStatusEvent.WaitOne(delayMilliseconds))
+                        {
+                            var details = new List<string>();
+                            foreach (var order in orders)
+                            {
+                                var detail = $"OrderID: {order.Id} expected OrderStatus {expectedStatus} actual {order.Status}";
+                                var invalidOrderEvent = invalidOrderEvents.FirstOrDefault(orderEvent => orderEvent.OrderId == order.Id);
+                                if (invalidOrderEvent != null)
+                                {
+                                    detail += $" Message: {invalidOrderEvent.Message}";
+                                }
+                                details.Add(detail);
+                            }
+                            Assert.Fail("Timeout: " + string.Join("; ", details));
+                        }
+                    }
+                }
+                else
+                {
+                    requiredStatusEvent.WaitOne(delayMilliseconds);
                 }
             }
-
-            // This is due to IB simulating stop orders https://www.interactivebrokers.com/en/trading/orders/stop.php
-            // which causes the Status.Submitted order event to never be set
-            var assertOrderEventStatus = true;
-            if (Brokerage.Name == "Interactive Brokers Brokerage" && orders.Any(o => o.Type is OrderType.StopMarket or OrderType.StopLimit))
+            finally
             {
-                assertOrderEventStatus = false;
+                Brokerage.OrdersStatusChanged -= brokerageOnOrdersStatusChanged;
             }
-
-            var delayMilliseconds = Convert.ToInt32(1000 * secondsTimeout);
-            if (assertOrderEventStatus)
-            {
-                if (requiredStatusEvent.WaitOneAssertFail(delayMilliseconds, "Expected every order to fire a submitted or invalid status event"))
-                {
-                    desiredStatusEvent.WaitOneAssertFail(delayMilliseconds,
-                        "OrderStatus " + expectedStatus + " was not encountered within the timeout." + string.Join("", orders.Select(x => " Order Id:" + x.Id)));
-                }
-            }
-            else
-            {
-                requiredStatusEvent.WaitOne(delayMilliseconds);
-            }
-
-            Brokerage.OrdersStatusChanged -= brokerageOnOrdersStatusChanged;
 
             return orders;
         }

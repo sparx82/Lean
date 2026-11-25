@@ -1,4 +1,4 @@
-/*
+﻿/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -198,7 +198,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             var security = _algorithm.Securities[_symbol];
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1600, 0, 0, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -228,7 +228,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             var security = _algorithm.Securities[_symbol];
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1600, 0, 0, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -259,7 +259,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             var security = _algorithm.Securities[_symbol];
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, -1600, 0, 0, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -298,22 +298,26 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                 .SetName("ShortSellKeepsLocateTags");
             yield return new TestCaseData(CreateLocateTagProperties(), 20m, -10m, false)
                 .SetName("SellToCloseDropsLocateTags");
+            yield return new TestCaseData(new BloombergFixOrderProperties { LocateBroker = "MLCO", PositionSide = OrderPosition.SellToOpen }, 20m, -10m, true)
+                .SetName("BloombergFixPositionSideShortKeepsLocate");
+            yield return new TestCaseData(new BloombergFixOrderProperties { LocateBroker = "MLCO", PositionSide = OrderPosition.SellToClose }, 0m, -10m, false)
+                .SetName("BloombergFixPositionSideCloseDropsLocate");
 
-            // TerminalLink keeps the locate broker and locate id together; either one alone counts
-            yield return new TestCaseData(new TerminalLinkOrderProperties { LocateBroker = "MLCO", LocateId = "LOC-123" }, 0m, -10m, true)
-                .SetName("ShortSellKeepsTerminalLinkLocate");
-            yield return new TestCaseData(new TerminalLinkOrderProperties { LocateBroker = "MLCO", LocateId = "LOC-123" }, 100m, -300m, true)
-                .SetName("CrossZeroSellKeepsTerminalLinkLocate");
-            yield return new TestCaseData(new TerminalLinkOrderProperties { LocateBroker = "MLCO", LocateId = "LOC-123" }, 20m, -10m, false)
-                .SetName("SellToCloseDropsTerminalLinkLocate");
-            yield return new TestCaseData(new TerminalLinkOrderProperties { LocateId = "LOC-123" }, 0m, -10m, true)
+            // Quant Bridge keeps the locate broker and locate id together; either one alone counts
+            yield return new TestCaseData(new QuantBridgeOrderProperties { LocateBroker = "MLCO", LocateId = "LOC-123" }, 0m, -10m, true)
+                .SetName("ShortSellKeepsQuantBridgeLocate");
+            yield return new TestCaseData(new QuantBridgeOrderProperties { LocateBroker = "MLCO", LocateId = "LOC-123" }, 100m, -300m, true)
+                .SetName("CrossZeroSellKeepsQuantBridgeLocate");
+            yield return new TestCaseData(new QuantBridgeOrderProperties { LocateBroker = "MLCO", LocateId = "LOC-123" }, 20m, -10m, false)
+                .SetName("SellToCloseDropsQuantBridgeLocate");
+            yield return new TestCaseData(new QuantBridgeOrderProperties { LocateId = "LOC-123" }, 0m, -10m, true)
                 .SetName("ShortSellKeepsLoneLocateId");
-            yield return new TestCaseData(new TerminalLinkOrderProperties { LocateId = "LOC-123" }, 20m, -10m, false)
+            yield return new TestCaseData(new QuantBridgeOrderProperties { LocateId = "LOC-123" }, 20m, -10m, false)
                 .SetName("SellToCloseDropsLoneLocateId");
-            yield return new TestCaseData(new TerminalLinkOrderProperties { LocateBroker = "MLCO", LocateId = "LOC-123", PositionSide = OrderPosition.SellToOpen }, 20m, -10m, true)
-                .SetName("TerminalLinkPositionSideShortKeepsLocate");
-            yield return new TestCaseData(new TerminalLinkOrderProperties { LocateBroker = "MLCO", LocateId = "LOC-123", PositionSide = OrderPosition.SellToClose }, 0m, -10m, false)
-                .SetName("TerminalLinkPositionSideCloseDropsLocate");
+            yield return new TestCaseData(new QuantBridgeOrderProperties { LocateBroker = "MLCO", LocateId = "LOC-123", PositionSide = OrderPosition.SellToOpen }, 20m, -10m, true)
+                .SetName("QuantBridgePositionSideShortKeepsLocate");
+            yield return new TestCaseData(new QuantBridgeOrderProperties { LocateBroker = "MLCO", LocateId = "LOC-123", PositionSide = OrderPosition.SellToClose }, 0m, -10m, false)
+                .SetName("QuantBridgePositionSideCloseDropsLocate");
 
             // Wolverine carries the locate broker only
             yield return new TestCaseData(new WolverineOrderProperties { LocateBroker = "MLCO", PositionSide = OrderPosition.SellToOpen }, 20m, -10m, true)
@@ -338,7 +342,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             var locateBefore = GetLocateState(properties);
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, quantity, 0, 0, DateTime.UtcNow, "", properties);
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -373,14 +377,14 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             _algorithm.Transactions.SetOrderProcessor(_transactionHandler);
             for (var i = 0; i < 2; i++)
             {
-                var properties = new TerminalLinkOrderProperties { LocateBroker = "MLCO" };
+                var properties = new QuantBridgeOrderProperties { LocateBroker = "MLCO" };
                 var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, -10, 0, 0, DateTime.UtcNow, "", properties);
                 _algorithm.Transactions.ProcessRequest(orderRequest);
                 _transactionHandler.HandleOrderRequest(orderRequest);
                 Assert.IsTrue(orderRequest.Response.IsSuccess);
 
                 // The order got a cleaned clone; the caller's own object is never touched
-                Assert.IsNull(((TerminalLinkOrderProperties)_transactionHandler.GetOrderById(orderRequest.OrderId).Properties).LocateBroker);
+                Assert.IsNull(((QuantBridgeOrderProperties)_transactionHandler.GetOrderById(orderRequest.OrderId).Properties).LocateBroker);
                 Assert.AreEqual("MLCO", properties.LocateBroker);
             }
 
@@ -394,7 +398,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
         {
             return properties switch
             {
-                TerminalLinkOrderProperties terminalLink => (terminalLink.LocateBroker, terminalLink.LocateId, null, null),
+                QuantBridgeOrderProperties quantBridge => (quantBridge.LocateBroker, quantBridge.LocateId, null, null),
                 WolverineOrderProperties wolverine => (wolverine.LocateBroker, null, null, null),
                 FixOrderProperties fix => (null, null, GetTag(fix, "5700"), GetTag(fix, "114")),
                 _ => default
@@ -433,7 +437,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             var security = _algorithm.Securities[_symbol];
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 600, 0, 0, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -461,7 +465,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             var security = _algorithm.Securities[_symbol];
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1000, 0, 0, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -494,7 +498,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             var security = _algorithm.Securities[_symbol];
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 600, 0, 0, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -528,7 +532,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
         [TestCase("VIXW", "1.16", "1.16")]
         [TestCase("VIXW", "4.14", "4.14")]
         [TestCase("VIXW", "4.16", "4.16")]
-        public void DynamicIndexOptionPriceRoundeding(string indexOption, string orderPriceStr, string expectedPriceStr)
+        public void DynamicIndexOptionPriceRounding(string indexOption, string orderPriceStr, string expectedPriceStr)
         {
             var orderPrice = decimal.Parse(orderPriceStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture);
             var expectedPrice = decimal.Parse(expectedPriceStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture);
@@ -545,7 +549,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Limit, security.Type, security.Symbol, 10, orderPrice, orderPrice, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -578,7 +582,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Limit, security.Type, security.Symbol, 1600, 1.12121212m, 1.12121212m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -612,7 +616,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.StopMarket, security.Type, security.Symbol, 1600, 1.12131212m, 1.12131212m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -769,7 +773,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Limit, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -967,7 +971,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             Assert.AreEqual(OrderStatus.Submitted, orderTicket.Status);
 
             var updateRequest = new UpdateOrderRequest(DateTime.Now, orderTicket.OrderId, new UpdateOrderFields() { Quantity = 10000 });
-            var updateTicket = _transactionHandler.Process(updateRequest);
+            _transactionHandler.Process(updateRequest);
             _transactionHandler.HandleOrderRequest(updateRequest);
             Assert.AreEqual(OrderRequestStatus.Processed, updateRequest.Status);
             Assert.IsTrue(updateRequest.Response.IsSuccess);
@@ -1010,7 +1014,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             Assert.AreEqual(OrderStatus.Submitted, orderTicket.Status);
 
             var updateRequest = new UpdateOrderRequest(DateTime.Now, orderTicket.OrderId, new UpdateOrderFields() { Quantity = 10000 });
-            var updateTicket = _transactionHandler.Process(updateRequest);
+            _transactionHandler.Process(updateRequest);
             _transactionHandler.HandleOrderRequest(updateRequest);
             Assert.AreEqual(OrderRequestStatus.Processed, updateRequest.Status);
             Assert.IsTrue(updateRequest.Response.IsSuccess);
@@ -1047,7 +1051,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Limit, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1089,7 +1093,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Limit, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1134,7 +1138,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                 var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1000, 0,
                     1.11m, DateTime.Now, "");
 
-                // Mock the the order processor
+                // Mock the order processor
                 var orderProcessorMock = new Mock<IOrderProcessor>();
                 orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>()))
                     .Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
@@ -1220,7 +1224,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1261,7 +1265,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1300,7 +1304,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Limit, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1336,7 +1340,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Limit, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1400,6 +1404,145 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
         }
 
         [Test]
+        public void ExitLeavesQueuedRequestsUntouchedInSynchronousMode()
+        {
+            _transactionHandler = new TestBrokerageTransactionHandler();
+            using var brokerage = new NoSubmitTestBrokerage(_algorithm);
+            _transactionHandler.Initialize(_algorithm, brokerage, new BacktestingResultHandler());
+
+            var security = _algorithm.Securities[_symbol];
+            var price = 1.12m;
+            security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
+            var orderRequest = new SubmitOrderRequest(OrderType.Limit, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
+
+            _algorithm.Transactions.SetOrderProcessor(_transactionHandler);
+
+            // submit a limit order and drain the queue like the engine would, then move it to submitted
+            var orderTicket = _transactionHandler.Process(orderRequest);
+            _transactionHandler.PumpPendingRequests();
+            Assert.IsTrue(orderRequest.Response.IsSuccess);
+            var submitted = new OrderEvent(_algorithm.Transactions.GetOpenOrders().Single(), _algorithm.UtcTime, OrderFee.Zero)
+            { Status = OrderStatus.Submitted };
+            brokerage.PublishOrderEvent(submitted);
+            Assert.AreEqual(OrderStatus.Submitted, orderTicket.Status);
+
+            // queue an update without draining, like one issued in OnEndOfAlgorithm after the last pump
+            var updateRequest = new UpdateOrderRequest(DateTime.UtcNow, orderTicket.OrderId, new UpdateOrderFields { Quantity = 2000 });
+            _transactionHandler.Process(updateRequest);
+            Assert.AreEqual(OrderRequestStatus.Processing, updateRequest.Status);
+
+            // the synchronous dispose leaves the queued request untouched, as it always has in backtesting
+            _transactionHandler.Exit();
+            Assert.AreEqual(OrderRequestStatus.Processing, updateRequest.Status);
+            Assert.AreEqual(1000, orderTicket.Quantity);
+        }
+
+        // A slow OnOrderEvent handler blocks the order event lock, and for Python the GIL, so the user is
+        // warned once and the measurement stops afterwards.
+        [Test]
+        public void SlowOnOrderEventHandlerWarnsOnlyOnce()
+        {
+            _transactionHandler = new TestBrokerageTransactionHandler();
+            using var brokerage = new NoSubmitTestBrokerage(_algorithm);
+            _transactionHandler.Initialize(_algorithm, brokerage, new BacktestingResultHandler());
+            // any handler run exceeds a negative threshold, even one under the millisecond tick resolution
+            _transactionHandler.SlowOnOrderEventThreshold = TimeSpan.FromTicks(-1);
+
+            var security = _algorithm.Securities[_symbol];
+            var price = 1.12m;
+            security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
+            var orderRequest = new SubmitOrderRequest(OrderType.Limit, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
+            _algorithm.Transactions.SetOrderProcessor(_transactionHandler);
+            _transactionHandler.Process(orderRequest);
+            _transactionHandler.PumpPendingRequests();
+
+            var order = _algorithm.Transactions.GetOpenOrders().Single();
+            brokerage.PublishOrderEvent(new OrderEvent(order, _algorithm.UtcTime, OrderFee.Zero) { Status = OrderStatus.Submitted });
+            Assert.AreEqual(1, _algorithm.DebugMessages.Count(message => message.Contains("OnOrderEvent")));
+
+            // the warning was sent, later slow handler runs are neither measured nor reported again
+            brokerage.PublishOrderEvent(new OrderEvent(order, _algorithm.UtcTime, OrderFee.Zero) { Status = OrderStatus.PartiallyFilled, FillQuantity = 1, FillPrice = price });
+            Assert.AreEqual(1, _algorithm.DebugMessages.Count(message => message.Contains("OnOrderEvent")));
+        }
+
+        [Test]
+        public void BrokerageOrderEventsCarryTheOrderTypeAndTag()
+        {
+            _transactionHandler = new TestBrokerageTransactionHandler();
+            using var brokerage = new NoSubmitTestBrokerage(_algorithm);
+            _transactionHandler.Initialize(_algorithm, brokerage, new BacktestingResultHandler());
+
+            var security = _algorithm.Securities[_symbol];
+            var price = 1.12m;
+            security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
+            var orderRequest = new SubmitOrderRequest(OrderType.Limit, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "entry");
+            _algorithm.Transactions.SetOrderProcessor(_transactionHandler);
+            _transactionHandler.Process(orderRequest);
+            _transactionHandler.PumpPendingRequests();
+
+            // brokerages building events from the order id alone do not know the order type or tag
+            var order = _algorithm.Transactions.GetOpenOrders().Single();
+            brokerage.PublishOrderEvent(new OrderEvent(order.Id, order.Symbol, _algorithm.UtcTime, OrderStatus.Submitted,
+                order.Direction, 0, 0, OrderFee.Zero, "Brokerage message"));
+
+            var orderEvent = _algorithm.OrderEvents.Single(orderEvent => orderEvent.Status == OrderStatus.Submitted);
+            Assert.AreEqual(OrderType.Limit, orderEvent.OrderType);
+            Assert.AreEqual(order.Type, orderEvent.OrderType);
+            Assert.IsNull(orderEvent.GroupId);
+            Assert.AreEqual("entry", orderEvent.Tag);
+            Assert.AreEqual("Brokerage message", orderEvent.Message);
+
+            // events after a tag update carry the new tag
+            _transactionHandler.Process(new UpdateOrderRequest(DateTime.Now, order.Id, new UpdateOrderFields { Tag = "exit" }));
+            _transactionHandler.PumpPendingRequests();
+            brokerage.PublishOrderEvent(new OrderEvent(order.Id, order.Symbol, _algorithm.UtcTime, OrderStatus.Filled,
+                order.Direction, 1.11m, 1000, OrderFee.Zero));
+
+            orderEvent = _algorithm.OrderEvents.Single(orderEvent => orderEvent.Status == OrderStatus.Filled);
+            Assert.AreEqual("exit", orderEvent.Tag);
+        }
+
+        [Test]
+        public void BrokerageOrderEventsCarryTheGroupId()
+        {
+            var algorithm = new TestAlgorithm { HistoryProvider = new EmptyHistoryProvider() };
+            algorithm.SubscriptionManager.SetDataManager(new DataManagerStub(algorithm));
+            algorithm.SetBrokerageModel(BrokerageName.Default);
+            algorithm.SetCash(1000000);
+            var index = algorithm.AddIndex("SPX").Symbol;
+            var option = Symbol.CreateOption(index, Market.USA, OptionStyle.European, OptionRight.Put, 300m, new DateTime(2024, 05, 16));
+            algorithm.AddIndexOptionContract(option);
+            algorithm.SetFinishedWarmingUp();
+
+            _transactionHandler = new TestBrokerageTransactionHandler();
+            using var brokerage = new NoSubmitTestBrokerage(algorithm);
+            _transactionHandler.Initialize(algorithm, brokerage, new BacktestingResultHandler());
+            algorithm.Transactions.SetOrderProcessor(_transactionHandler);
+
+            var dateTime = new DateTime(2024, 05, 14, 12, 0, 0);
+            var groupOrderManager = new GroupOrderManager(1, 2, 10);
+            foreach (var (symbol, price) in new[] { (index, 1.12m), (option, 330.12m) })
+            {
+                var security = algorithm.Securities[symbol];
+                security.SetMarketPrice(new Tick(dateTime, symbol, price, price, price));
+                algorithm.Transactions.AddOrder(new SubmitOrderRequest(OrderType.ComboMarket, security.Type, symbol, 10, 0, 0, dateTime, "",
+                    groupOrderManager: groupOrderManager));
+            }
+            _transactionHandler.PumpPendingRequests();
+
+            var order = algorithm.Transactions.GetOpenOrders().Single(openOrder => openOrder.Symbol == option);
+            Assert.AreEqual(1, order.GroupOrderManager.Id);
+
+            // brokerages building events from the order id alone do not know the order group
+            brokerage.PublishOrderEvent(new OrderEvent(order.Id, order.Symbol, algorithm.UtcTime, OrderStatus.PartiallyFilled,
+                order.Direction, 330.12m, 1, OrderFee.Zero));
+
+            var orderEvent = algorithm.OrderEvents.Single(orderEvent => orderEvent.Status == OrderStatus.PartiallyFilled);
+            Assert.AreEqual(OrderType.ComboMarket, orderEvent.OrderType);
+            Assert.AreEqual(order.GroupOrderManager.Id, orderEvent.GroupId);
+        }
+
+        [Test]
         public void CancelOrderRequestShouldFailForFilledOrder()
         {
             // Initializes the transaction handler
@@ -1412,7 +1555,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1449,7 +1592,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1492,7 +1635,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1539,7 +1682,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1586,7 +1729,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1650,7 +1793,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1683,7 +1826,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Limit, security.Type, security.Symbol, 1000, 0, 1.11m, DateTime.Now, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1810,7 +1953,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             {
                 CallBase = true
             };
-            var cashBalance = mock.Setup(m => m.GetCashBalance()).Returns(new List<CashAmount>());
+            mock.Setup(m => m.GetCashBalance()).Returns(new List<CashAmount>());
             mock.Setup(m => m.IsConnected).Returns(true);
             mock.Setup(m => m.ShouldPerformCashSync(It.IsAny<DateTime>())).Returns(true);
 
@@ -1966,7 +2109,7 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             security.SetMarketPrice(new Tick(DateTime.Now, security.Symbol, price, price, price));
             var orderRequest = new SubmitOrderRequest(OrderType.Market, security.Type, security.Symbol, -1000, 0, 1.11m, DateTime.UtcNow, "");
 
-            // Mock the the order processor
+            // Mock the order processor
             var orderProcessorMock = new Mock<IOrderProcessor>();
             orderProcessorMock.Setup(m => m.GetOrderTicket(It.IsAny<int>())).Returns(new OrderTicket(_algorithm.Transactions, orderRequest));
             _algorithm.Transactions.SetOrderProcessor(orderProcessorMock.Object);
@@ -1976,6 +2119,221 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             Assert.AreEqual(orderTicket.Status, OrderStatus.Invalid);
             Assert.AreEqual(_algorithm.OrderEvents.Count, 1);
             Assert.AreEqual(_algorithm.OrderEvents.Count(orderEvent => orderEvent.Status == OrderStatus.Invalid), 1);
+        }
+
+        [TestCase(false, 7, OptionRight.Put, 450, 460, 7, 100, Description = "Long Put -> OTM, backtest mode leaves it to the delisting")]
+        [TestCase(true, 7, OptionRight.Put, 450, 460, 0, 100, Description = "Long Put -> OTM, expired worthless")]
+        [TestCase(true, -1, OptionRight.Call, 450, 455, 0, 0, Description = "Short Call -> ITM, assigned, gives the shares")]
+        [TestCase(true, -1, OptionRight.Put, 455, 450, 0, 200, Description = "Short Put -> ITM, assigned, gets the shares")]
+        [TestCase(true, 1, OptionRight.Call, 450, 455, 0, 200, Description = "Long Call -> ITM, exercised, gets the shares")]
+        [TestCase(true, 1, OptionRight.Put, 455, 450, 0, 0, Description = "Long Put -> ITM, exercised, gives the shares")]
+        public void ProcessSynchronousEventsClearsExpiredOptionHoldingsOnlyInLiveMode(
+            bool liveMode,
+            int optionPosition,
+            OptionRight optionRight,
+            decimal strikePrice,
+            decimal underlyingPrice,
+            int expectedOptionPosition,
+            int expectedUnderlyingPosition
+            )
+        {
+            // Arrange: a SPY option held past its expiry, with 100 shares of the underlying
+            var algorithm = new TestAlgorithm();
+            var equity = algorithm.AddEquity("SPY");
+            var optionSymbol = Symbol.CreateOption(equity.Symbol, equity.Symbol.ID.Market, OptionStyle.American, optionRight, strikePrice, new DateTime(2021, 9, 8));
+            var option = algorithm.AddOptionContract(optionSymbol);
+            algorithm.Portfolio[equity.Symbol].SetHoldings(underlyingPrice, 100);
+            algorithm.Portfolio[option.Symbol].SetHoldings(0.01m, optionPosition);
+            equity.SetMarketPrice(new Tick { Value = underlyingPrice });
+            algorithm.SetLiveMode(liveMode);
+
+            using var brokerage = new NoSubmitTestBrokerage(algorithm);
+            _transactionHandler = new TestBrokerageTransactionHandler();
+            _transactionHandler.Initialize(algorithm, brokerage, new BacktestingResultHandler());
+            algorithm.Transactions.SetOrderProcessor(_transactionHandler);
+
+            // 8 AM ET the day after expiry, inside the daily cash sync window
+            _transactionHandler.TestCurrentTimeUtc = new DateTime(2021, 9, 9, 12, 0, 0);
+
+            // Act: two daily passes, the second must find nothing to book
+            _transactionHandler.ProcessSynchronousEvents();
+            _transactionHandler.TestCurrentTimeUtc = _transactionHandler.TestCurrentTimeUtc.AddDays(1);
+            _transactionHandler.ProcessSynchronousEvents();
+            _transactionHandler.Exit();
+
+            // Assert
+            Assert.That(algorithm.Transactions.GetOrderTickets().Count(), Is.EqualTo(liveMode ? 1 : 0));
+            Assert.That(algorithm.Portfolio[optionSymbol].Quantity, Is.EqualTo(expectedOptionPosition));
+            Assert.That(algorithm.Portfolio[equity.Symbol].Quantity, Is.EqualTo(expectedUnderlyingPosition));
+        }
+
+        [TestCase(-7, 0, 0, -600, Description = "Short Call -> ITM, assigned early in full, not listed at the brokerage, gives the shares")]
+        [TestCase(-7, -3, -3, -300, Description = "Short Call -> ITM, assigned early in part, gives the shares")]
+        [TestCase(-7, -7, -7, 100, Description = "Short Call -> ITM, same position at the brokerage, nothing booked")]
+        public void ProcessSynchronousEventsBooksEarlyAssignmentFromBrokerageHoldings(
+            int optionPosition,
+            int brokeragePosition,
+            int expectedOptionPosition,
+            int expectedUnderlyingPosition
+            )
+        {
+            // Arrange: a short SPY call, ITM before its expiry, with 100 shares of the underlying, in live mode
+            var algorithm = new TestAlgorithm();
+            var equity = algorithm.AddEquity("SPY");
+            var optionSymbol = Symbol.CreateOption(equity.Symbol, equity.Symbol.ID.Market, OptionStyle.American, OptionRight.Call, 450m, new DateTime(2021, 9, 10));
+            var option = algorithm.AddOptionContract(optionSymbol);
+            algorithm.Portfolio[equity.Symbol].SetHoldings(455m, 100);
+            algorithm.Portfolio[option.Symbol].SetHoldings(0.01m, optionPosition);
+            equity.SetMarketPrice(new Tick { Value = 455m });
+            algorithm.SetLiveMode(true);
+
+            using var brokerage = new NoSubmitTestBrokerage(algorithm);
+            // a brokerage does not list a position it no longer holds, so 0 means the contract is missing
+            brokerage.AccountHoldings = new List<Holding> { new Holding { Symbol = equity.Symbol, Quantity = 100 } };
+            if (brokeragePosition != 0)
+            {
+                brokerage.AccountHoldings.Add(new Holding { Symbol = optionSymbol, Quantity = brokeragePosition });
+            }
+            _transactionHandler = new TestBrokerageTransactionHandler();
+            _transactionHandler.Initialize(algorithm, brokerage, new BacktestingResultHandler());
+            algorithm.Transactions.SetOrderProcessor(_transactionHandler);
+
+            // 8 AM ET the day before expiry, inside the daily cash sync window
+            _transactionHandler.TestCurrentTimeUtc = new DateTime(2021, 9, 9, 12, 0, 0);
+
+            // Act: two daily passes, the second must find nothing to book
+            _transactionHandler.ProcessSynchronousEvents();
+            _transactionHandler.TestCurrentTimeUtc = _transactionHandler.TestCurrentTimeUtc.AddDays(1);
+            _transactionHandler.ProcessSynchronousEvents();
+            _transactionHandler.Exit();
+
+            // Assert
+            Assert.That(algorithm.Transactions.GetOrderTickets().Count(), Is.EqualTo(brokeragePosition == optionPosition ? 0 : 1));
+            Assert.That(algorithm.Portfolio[optionSymbol].Quantity, Is.EqualTo(expectedOptionPosition));
+            Assert.That(algorithm.Portfolio[equity.Symbol].Quantity, Is.EqualTo(expectedUnderlyingPosition));
+        }
+
+        [TestCase(true, -7, false, 1, 0, -600, Description = "Short Call -> ITM, no underlying price after a restart, seeded from history, assigned in full")]
+        [TestCase(false, -7, false, 0, -7, 100, Description = "Short Call -> ITM, no underlying price and no history, not synced")]
+        [TestCase(true, 1, true, 1, 0, 200, Description = "Long Call -> ITM, expired, no underlying price after a restart, seeded from history, exercised, gets the shares")]
+        public void ProcessSynchronousEventsSeedsUnderlyingPriceFromHistoryWhenMissing(
+            bool historyHasPrice,
+            int optionPosition,
+            bool expired,
+            int expectedTickets,
+            int expectedOptionPosition,
+            int expectedUnderlyingPosition
+            )
+        {
+            // Arrange: a SPY call loaded after a night restart, the underlying has no price yet
+            var algorithm = new TestAlgorithm
+            {
+                HistoryProvider = historyHasPrice ? new LastPriceHistoryProvider(455m) : new EmptyHistoryProvider()
+            };
+            var equity = algorithm.AddEquity("SPY");
+            // the contract expired the day before the pass, or expires the day after
+            var expiry = expired ? new DateTime(2021, 9, 8) : new DateTime(2021, 9, 10);
+            var optionSymbol = Symbol.CreateOption(equity.Symbol, equity.Symbol.ID.Market, OptionStyle.American, OptionRight.Call, 450m, expiry);
+            var option = algorithm.AddOptionContract(optionSymbol);
+            algorithm.Portfolio[equity.Symbol].SetHoldings(455m, 100);
+            algorithm.Portfolio[option.Symbol].SetHoldings(0.01m, optionPosition);
+            algorithm.SetLiveMode(true);
+
+            using var brokerage = new NoSubmitTestBrokerage(algorithm);
+            // the brokerage no longer lists the contract
+            brokerage.AccountHoldings = new List<Holding> { new Holding { Symbol = equity.Symbol, Quantity = 100 } };
+            _transactionHandler = new TestBrokerageTransactionHandler();
+            _transactionHandler.Initialize(algorithm, brokerage, new BacktestingResultHandler());
+            algorithm.Transactions.SetOrderProcessor(_transactionHandler);
+
+            // 8 AM ET on 2021-09-09, inside the daily cash sync window
+            _transactionHandler.TestCurrentTimeUtc = new DateTime(2021, 9, 9, 12, 0, 0);
+
+            // Act
+            _transactionHandler.ProcessSynchronousEvents();
+            _transactionHandler.Exit();
+
+            // Assert
+            Assert.That(algorithm.Transactions.GetOrderTickets().Count(), Is.EqualTo(expectedTickets));
+            Assert.That(algorithm.Portfolio[optionSymbol].Quantity, Is.EqualTo(expectedOptionPosition));
+            Assert.That(algorithm.Portfolio[equity.Symbol].Quantity, Is.EqualTo(expectedUnderlyingPosition));
+        }
+
+        [TestCase(1, Description = "Long Call -> ITM, expired, the holdings read fails on the first day, booked on the second day")]
+        [TestCase(2, Description = "Long Call -> ITM, expired, the holdings read fails on two days, booked on the third day")]
+        public void ProcessSynchronousEventsSkipsTheOptionHoldingsSyncForTheDayWhenTheBrokerageReadFails(int failedReads)
+        {
+            // Arrange: an expired long SPY call, ITM, with 100 shares of the underlying, in live mode
+            var algorithm = new TestAlgorithm();
+            var equity = algorithm.AddEquity("SPY");
+            var optionSymbol = Symbol.CreateOption(equity.Symbol, equity.Symbol.ID.Market, OptionStyle.American, OptionRight.Call, 450m, new DateTime(2021, 9, 8));
+            var option = algorithm.AddOptionContract(optionSymbol);
+            algorithm.Portfolio[equity.Symbol].SetHoldings(455m, 100);
+            algorithm.Portfolio[option.Symbol].SetHoldings(0.01m, 1);
+            equity.SetMarketPrice(new Tick { Value = 455m });
+            algorithm.SetLiveMode(true);
+
+            using var brokerage = new NoSubmitTestBrokerage(algorithm) { AccountHoldingsFailures = failedReads };
+            _transactionHandler = new TestBrokerageTransactionHandler();
+            _transactionHandler.Initialize(algorithm, brokerage, new BacktestingResultHandler());
+            algorithm.Transactions.SetOrderProcessor(_transactionHandler);
+
+            // Act: two passes a day at 8 AM ET, from the day after expiry; a failed read leaves the contract for the next day
+            for (var day = 0; day <= failedReads; day++)
+            {
+                _transactionHandler.TestCurrentTimeUtc = new DateTime(2021, 9, 9, 12, 0, 0).AddDays(day);
+                _transactionHandler.ProcessSynchronousEvents();
+                _transactionHandler.ProcessSynchronousEvents();
+                if (day < failedReads)
+                {
+                    Assert.That(algorithm.Transactions.GetOrderTickets().Count(), Is.EqualTo(0));
+                }
+            }
+            _transactionHandler.Exit();
+
+            // Assert
+            Assert.That(algorithm.Transactions.GetOrderTickets().Count(), Is.EqualTo(1));
+            Assert.That(algorithm.Portfolio[optionSymbol].Quantity, Is.EqualTo(0));
+            Assert.That(algorithm.Portfolio[equity.Symbol].Quantity, Is.EqualTo(200));
+        }
+
+        [TestCase(true, 1, 0, -600, Description = "Short Call -> ITM, not listed at the brokerage, the sync books the assignment")]
+        [TestCase(false, 0, -7, 100, Description = "Short Call -> ITM, not listed at the brokerage, the brokerage reports option position changes itself, nothing booked")]
+        public void ProcessSynchronousEventsSyncsTheOptionHoldingsOnlyWhenTheBrokerageEnablesIt(
+            bool holdingsSyncEnabled,
+            int expectedTickets,
+            int expectedOptionPosition,
+            int expectedUnderlyingPosition
+            )
+        {
+            // Arrange: a short SPY call, ITM before its expiry, with 100 shares of the underlying, in live mode
+            var algorithm = new TestAlgorithm();
+            var equity = algorithm.AddEquity("SPY");
+            var optionSymbol = Symbol.CreateOption(equity.Symbol, equity.Symbol.ID.Market, OptionStyle.American, OptionRight.Call, 450m, new DateTime(2021, 9, 10));
+            var option = algorithm.AddOptionContract(optionSymbol);
+            algorithm.Portfolio[equity.Symbol].SetHoldings(455m, 100);
+            algorithm.Portfolio[option.Symbol].SetHoldings(0.01m, -7);
+            equity.SetMarketPrice(new Tick { Value = 455m });
+            algorithm.SetLiveMode(true);
+
+            using var brokerage = new NoSubmitTestBrokerage(algorithm, holdingsSyncEnabled);
+            // the brokerage does not list the contract, as a stale holdings read does after a reconnect
+            brokerage.AccountHoldings = new List<Holding> { new Holding { Symbol = equity.Symbol, Quantity = 100 } };
+            _transactionHandler = new TestBrokerageTransactionHandler();
+            _transactionHandler.Initialize(algorithm, brokerage, new BacktestingResultHandler());
+            algorithm.Transactions.SetOrderProcessor(_transactionHandler);
+
+            // 8 AM ET on 2021-09-09, inside the daily cash sync window
+            _transactionHandler.TestCurrentTimeUtc = new DateTime(2021, 9, 9, 12, 0, 0);
+
+            // Act
+            _transactionHandler.ProcessSynchronousEvents();
+            _transactionHandler.Exit();
+
+            // Assert
+            Assert.That(algorithm.Transactions.GetOrderTickets().Count(), Is.EqualTo(expectedTickets));
+            Assert.That(algorithm.Portfolio[optionSymbol].Quantity, Is.EqualTo(expectedOptionPosition));
+            Assert.That(algorithm.Portfolio[equity.Symbol].Quantity, Is.EqualTo(expectedUnderlyingPosition));
         }
 
         // Short Call --> OTM (expired worthless)
@@ -2951,14 +3309,81 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
                         StopTriggered = false
                     };
                     _transactionHandler.AddOpenOrder(stopLimitOrder, algorithm);
-                    brokerage.CreateOrderUpdatedEvent(new OrderUpdateEvent { OrderId = 2, StopTriggered = true });
+                    brokerage.CreateOrderUpdatedEvent(new OrderUpdateEvent { OrderId = 2, StopTriggered = true, StopTriggeredTime = referenceDateTime });
                     var updatedStopLimitOrder = (StopLimitOrder)_transactionHandler
                         .GetOrdersByBrokerageId(1)
                         .First(e => e.Id == 2);
                     // StopTriggered flag should remain false
                     Assert.IsFalse(updatedStopLimitOrder.StopTriggered);
+                    Assert.IsNull(updatedStopLimitOrder.StopTriggeredTime);
                     break;
             }
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void BrokerageTransactionHandlerAppliesStopLimitOrderUpdates(bool providesStopTriggeredTime)
+        {
+            var referenceDateTime = new DateTime(2024, 01, 25, 10, 0, 0);
+
+            var algorithm = new TestAlgorithm();
+            algorithm.SubscriptionManager.SetDataManager(new DataManagerStub(algorithm));
+            algorithm.SetBrokerageMessageHandler(new TestBrokerageMessageHandler());
+
+            _transactionHandler = new TestBrokerageTransactionHandler();
+            using var brokerage = new EventEmittingBrokerage(algorithm);
+            _transactionHandler.Initialize(algorithm, brokerage, new BacktestingResultHandler());
+
+            var security = algorithm.AddEquity("SPY");
+            var stopLimitOrder = new StopLimitOrder(security.Symbol, 100, 100, 100, referenceDateTime)
+            {
+                Id = 1,
+                BrokerId = new List<string> { "1" }
+            };
+            _transactionHandler.AddOpenOrder(stopLimitOrder, algorithm);
+            algorithm.Status = AlgorithmStatus.Running;
+
+            var stopTriggeredTime = providesStopTriggeredTime ? referenceDateTime : (DateTime?)null;
+            brokerage.CreateOrderUpdatedEvent(new OrderUpdateEvent { OrderId = 1, StopTriggered = true, StopTriggeredTime = stopTriggeredTime });
+
+            var updatedStopLimitOrder = (StopLimitOrder)_transactionHandler.GetOrdersByBrokerageId(1).Single();
+            Assert.IsTrue(updatedStopLimitOrder.StopTriggered);
+            // brokerages that don't provide the trigger time get the current algorithm time
+            Assert.AreEqual(providesStopTriggeredTime ? referenceDateTime : algorithm.UtcTime, updatedStopLimitOrder.StopTriggeredTime);
+        }
+
+        [TestCase(DataNormalizationMode.Raw, 15.10, 0.03)]
+        [TestCase(DataNormalizationMode.SplitAdjusted, 15.10, 0.03)]
+        [TestCase(DataNormalizationMode.Raw, 20, 0)]
+        public void DelistingAfterCashDistributionDoesNotCountItTwice(DataNormalizationMode mode, decimal distribution, decimal expectedFillPrice)
+        {
+            const decimal lastPrice = 15.13m;
+            const int quantity = 100;
+            var referenceDateTime = new DateTime(2024, 05, 17, 16, 0, 0);
+
+            var algorithm = new TestAlgorithm();
+            algorithm.SetBrokerageMessageHandler(new TestBrokerageMessageHandler());
+
+            _transactionHandler = new TestBrokerageTransactionHandler();
+            using var brokerage = new EventEmittingBrokerage(algorithm);
+            _transactionHandler.Initialize(algorithm, brokerage, new BacktestingResultHandler());
+
+            // the security never trades again after this bar, it pays out the distribution and is delisted
+            var security = algorithm.AddEquity("SPY", dataNormalizationMode: mode);
+            security.SetMarketPrice(new TradeBar(referenceDateTime, security.Symbol, lastPrice, lastPrice, lastPrice, lastPrice, 1000, Time.OneMinute));
+            security.Holdings.SetHoldings(lastPrice, quantity);
+            algorithm.Status = AlgorithmStatus.Running;
+            var initialCash = algorithm.Portfolio.Cash;
+
+            algorithm.Portfolio.ApplyDividend(new Dividend(security.Symbol, referenceDateTime.Date.AddDays(3), distribution, lastPrice), false, mode);
+            brokerage.CreateDelistingNotificationEvent(new DelistingNotificationEventArgs(security.Symbol));
+
+            var fill = _transactionHandler.OrderEvents.Single(orderEvent => orderEvent.Status == OrderStatus.Filled);
+            Assert.AreEqual(expectedFillPrice, fill.FillPrice);
+            Assert.AreEqual(0, security.Holdings.Quantity);
+            // the position is realized once: the distribution plus what is left of the price
+            Assert.AreEqual(initialCash + quantity * (distribution + expectedFillPrice), algorithm.Portfolio.Cash);
+            Assert.AreEqual(algorithm.Portfolio.Cash, algorithm.Portfolio.TotalPortfolioValue);
         }
 
         internal class TestIncrementalOrderIdAlgorithm : OrderTicketDemoAlgorithm
@@ -3010,6 +3435,33 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
             }
         }
 
+        internal class LastPriceHistoryProvider : HistoryProviderBase
+        {
+            private readonly decimal _price;
+
+            public override int DataPointCount => 1;
+
+            public LastPriceHistoryProvider(decimal price)
+            {
+                _price = price;
+            }
+
+            public override void Initialize(HistoryProviderInitializeParameters parameters)
+            {
+            }
+
+            public override IEnumerable<Slice> GetHistory(IEnumerable<HistoryRequest> requests, DateTimeZone sliceTimeZone)
+            {
+                var time = new DateTime(2021, 9, 8, 16, 0, 0);
+                var bars = new List<BaseData>();
+                foreach (var symbol in requests.Select(x => x.Symbol).Distinct())
+                {
+                    bars.Add(new TradeBar(time, symbol, _price, _price, _price, _price, 0));
+                }
+                return new[] { new Slice(time, bars, time) };
+            }
+        }
+
         internal class TestBrokerageModel : DefaultBrokerageModel
         {
             public override bool CanUpdateOrder(Security security, Order order, UpdateOrderRequest request, out BrokerageMessageEvent message)
@@ -3039,11 +3491,19 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
         {
             private BacktestingBrokerage _underlyingBrokerage;
 
+            public List<Holding> AccountHoldings { get; set; }
+
+            // the number of GetAccountHoldings calls that throw before one succeeds
+            public int AccountHoldingsFailures { get; set; }
+
             public override bool IsConnected => _underlyingBrokerage.IsConnected;
 
-            public NoSubmitTestBrokerage(IAlgorithm algorithm) : base("NoSubmitTestBrokerage")
+            public override bool HoldingsSyncEnabled { get; }
+
+            public NoSubmitTestBrokerage(IAlgorithm algorithm, bool holdingsSyncEnabled = true) : base("NoSubmitTestBrokerage")
             {
                 _underlyingBrokerage = new BacktestingBrokerage(algorithm);
+                HoldingsSyncEnabled = holdingsSyncEnabled;
             }
             public override bool PlaceOrder(Order order)
             {
@@ -3080,7 +3540,12 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
 
             public override List<Holding> GetAccountHoldings()
             {
-                return _underlyingBrokerage.GetAccountHoldings();
+                if (AccountHoldingsFailures-- > 0)
+                {
+                    throw new Exception("Connection error in GetAccountHoldings");
+                }
+
+                return AccountHoldings ?? _underlyingBrokerage.GetAccountHoldings();
             }
 
             public override List<CashAmount> GetCashBalance()
@@ -3122,6 +3587,17 @@ namespace QuantConnect.Tests.Engine.BrokerageTransactionHandlerTests
 
             // no worker thread: these tests drive HandleOrderRequest manually
             protected override bool SynchronousProcessing => true;
+
+            // the tests handle the request themselves after submitting it, so there is nothing to wait for
+            protected override void WaitForOrderSubmission(OrderTicket ticket)
+            {
+            }
+
+            // drains the queued requests like the engine would, so tests can leave the queue truly empty or not
+            public void PumpPendingRequests()
+            {
+                ProcessPendingRequests();
+            }
 
             public override void Initialize(IAlgorithm algorithm, IBrokerage brokerage, IResultHandler resultHandler)
             {

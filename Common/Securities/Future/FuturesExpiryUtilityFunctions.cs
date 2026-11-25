@@ -30,7 +30,7 @@ namespace QuantConnect.Securities.Future
         /// <summary>
         /// Get holiday list from the MHDB given the market and the symbol of the security
         /// </summary>
-        /// <param name="market">The market the exchange resides in, i.e, 'usa', 'fxcm', ect...</param>
+        /// <param name="market">The market the exchange resides in, i.e, 'usa', 'fxcm', etc...</param>
         /// <param name="symbol">The particular symbol being traded</param>s
         internal static HashSet<DateTime> GetExpirationHolidays(string market, string symbol)
         {
@@ -415,6 +415,9 @@ namespace QuantConnect.Securities.Future
             { Futures.Energy.NaturalGasHenryHubPenultimateFinancial, 1 },
             { Futures.Energy.WTIHoustonArgusVsWTITradeMonth, 1 },
             { Futures.Energy.WTIHoustonCrudeOil, 1 },
+            { Futures.Financials.MicroUltraTenYearUSTreasuryNote, 1 },
+            { Futures.Financials.MicroUltraUSTreasuryBond, 1 },
+            { Futures.Metals.OneOunceGold, 1 },
             { Futures.Softs.Sugar11, 1 },
             { Futures.Softs.Sugar11CME, 1 }
         };

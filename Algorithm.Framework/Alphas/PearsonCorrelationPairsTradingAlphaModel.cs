@@ -24,7 +24,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
 {
     /// <summary>
     /// This alpha model is designed to rank every pair combination by its pearson correlation
-    /// and trade the pair with the hightest correlation
+    /// and trade the pair with the highest correlation
     /// This model generates alternating long ratio/short ratio insights emitted as a group
     /// </summary>
     public class PearsonCorrelationPairsTradingAlphaModel : BasePairsTradingAlphaModel
@@ -66,7 +66,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas
 
             if (vectors.LongLength == 0)
             {
-                algorithm.Debug($"PearsonCorrelationPairsTradingAlphaModel.OnSecuritiesChanged(): The requested historical data does not have series of prices with the same date/time. Please consider increasing the looback period. Current lookback: {_lookback}");
+                algorithm.Debug($"PearsonCorrelationPairsTradingAlphaModel.OnSecuritiesChanged(): The requested historical data does not have series of prices with the same date/time. Please consider increasing the lookback period. Current lookback: {_lookback}");
             }
             else
             {

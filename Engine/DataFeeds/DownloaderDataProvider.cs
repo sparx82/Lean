@@ -88,7 +88,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                         if (!_customDataDownloadError)
                         {
                             _customDataDownloadError = true;
-                            // lean data writter doesn't support it
+                            // lean data writer doesn't support it
                             Log.Trace($"DownloaderDataProvider.Get(): custom data is not supported, requested: {symbol}");
                         }
                         return;
@@ -251,11 +251,11 @@ namespace QuantConnect.Lean.Engine.DataFeeds
         }
 
         /// <summary>
-        /// Get's the stream for a given file path
+        /// Gets the stream for a given file path
         /// </summary>
         protected override Stream GetStream(string key)
         {
-            if (LeanData.TryParsePath(key, out var symbol, out var date, out var resolution, out var _) && resolution > Resolution.Minute && symbol.RequiresMapping())
+            if (LeanData.TryParsePath(key, out var symbol, out _, out var resolution, out var _) && resolution > Resolution.Minute && symbol.RequiresMapping())
             {
                 // because the file could be updated even after it's created because of symbol mapping we can't stream from disk
                 return DiskSynchronizer.Execute(key, () =>

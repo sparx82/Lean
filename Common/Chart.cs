@@ -34,7 +34,7 @@ namespace QuantConnect
         /// </summary>
         public string Name { get; set; } = string.Empty;
 
-        /// Type of the Chart, Overlayed or Stacked.
+        /// Type of the Chart, Overlaid or Stacked.
         [Obsolete("ChartType is now obsolete. Please use Series indexes instead by setting index in the series constructor.")]
         public ChartType ChartType { get; set; } = ChartType.Overlay;
 
@@ -98,7 +98,7 @@ namespace QuantConnect
         /// <param name="series">Chart series class object</param>
         public void AddSeries(BaseSeries series)
         {
-            //If we dont already have this series, add to the chrt:
+            //If we don't already have this series, add to the chart:
             if (!Series.TryAdd(series.Name, series))
             {
                 throw new DuplicateNameException($"Chart.AddSeries(): ${Messages.Chart.ChartSeriesAlreadyExists}");
@@ -227,11 +227,11 @@ namespace QuantConnect
     }
 
     /// <summary>
-    /// Type of chart - should we draw the series as overlayed or stacked
+    /// Type of chart - should we draw the series as overlaid or stacked
     /// </summary>
     public enum ChartType
     {
-        /// Overlayed stacked (0)
+        /// Overlaid stacked (0)
         Overlay,
         /// Stacked series on top of each other. (1)
         Stacked

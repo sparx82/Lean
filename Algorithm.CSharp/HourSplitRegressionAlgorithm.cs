@@ -48,8 +48,7 @@ namespace QuantConnect.Algorithm.CSharp
         {
             _dataCount += slice.Bars.Count;
 
-            TradeBar bar;
-            if (!slice.Bars.TryGetValue(_symbol, out bar)) return;
+            if (!slice.Bars.TryGetValue(_symbol, out _)) return;
 
             if (!Portfolio.Invested && Time.Date == EndDate.Date)
             {
@@ -123,13 +122,13 @@ namespace QuantConnect.Algorithm.CSharp
             {"Total Orders", "1"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
-            {"Compounding Annual Return", "-0.068%"},
+            {"Compounding Annual Return", "0.010%"},
             {"Drawdown", "0.000%"},
             {"Expectancy", "0"},
             {"Start Equity", "100000"},
-            {"End Equity", "99999.31"},
-            {"Net Profit", "-0.001%"},
-            {"Sharpe Ratio", "-128.305"},
+            {"End Equity", "100000.11"},
+            {"Net Profit", "0.000%"},
+            {"Sharpe Ratio", "-768.773"},
             {"Sortino Ratio", "0"},
             {"Probabilistic Sharpe Ratio", "0%"},
             {"Loss Rate", "0%"},
@@ -139,10 +138,10 @@ namespace QuantConnect.Algorithm.CSharp
             {"Beta", "0"},
             {"Annual Standard Deviation", "0"},
             {"Annual Variance", "0"},
-            {"Information Ratio", "-9.163"},
+            {"Information Ratio", "9.166"},
             {"Tracking Error", "0"},
             {"Treynor Ratio", "0"},
-            {"Total Fees", "$1.00"},
+            {"Total Fees", "$0.21"},
             {"Estimated Strategy Capacity", "$160000000000.00"},
             {"Lowest Capacity Asset", "AAPL R735QTJ8XC9X"},
             {"Portfolio Turnover", "0.01%"},

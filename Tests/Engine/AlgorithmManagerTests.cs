@@ -235,6 +235,12 @@ namespace QuantConnect.Tests.Engine
             {
             }
 
+            public void AddDeploymentDetail(string key, string value)
+            {
+            }
+
+            public ReadOnlyExtendedDictionary<string, string> DeploymentDetails { get; } = new();
+
             public void RuntimeStatistic(string key, string value)
             {
             }

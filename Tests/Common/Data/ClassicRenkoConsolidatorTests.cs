@@ -157,11 +157,9 @@ namespace QuantConnect.Tests.Common.Data
         public void ClassicCyclesUpAndDown()
         {
             RenkoBar bar = null;
-            int rcount = 0;
             using var consolidator = new ClassicRenkoConsolidator(1m, x => x.Value, x => 0);
             consolidator.DataConsolidated += (sender, consolidated) =>
             {
-                rcount++;
                 bar = consolidated;
             };
 
@@ -200,7 +198,7 @@ namespace QuantConnect.Tests.Common.Data
             consolidator.Update(new IndicatorDataPoint(reference.AddSeconds(6), 0m));
             Assert.IsNotNull(bar);
 
-            // ReSharper disable HeuristicUnreachableCode - ReSharper doesn't realiz this can be set via the event handler
+            // ReSharper disable HeuristicUnreachableCode - ReSharper doesn't realize this can be set via the event handler
             Assert.AreEqual(1m, bar.Open);
             Assert.AreEqual(0m, bar.Close);
             Assert.AreEqual(0, bar.Volume);
@@ -274,7 +272,7 @@ def getConsolidator():
 ");
                     Assert.DoesNotThrow(() =>
                     {
-                        var consolidator = testModule.GetAttr("getConsolidator").Invoke();
+                        testModule.GetAttr("getConsolidator").Invoke();
                     });
                 }
             }

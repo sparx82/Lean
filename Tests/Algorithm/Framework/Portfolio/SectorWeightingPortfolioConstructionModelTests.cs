@@ -246,7 +246,7 @@ namespace QuantConnect.Tests.Algorithm.Framework.Portfolio
                 .Select(x => GetInsight(x.Key, InsightDirection.Up, Algorithm.UtcTime))
                 .ToArray();
 
-            // Since we have 3 B, 2 T and 1 X, each security in each secotr will get B => .11%, T => .165, X => .33%
+            // Since we have 3 B, 2 T and 1 X, each security in each sector will get B => .11%, T => .165, X => .33%
             var sectorCount = 3;
             var groupedBySector = Algorithm.Securities
                 .Where(pair => pair.Value.Fundamentals?.CompanyReference.IndustryTemplateCode != null)
@@ -281,17 +281,17 @@ namespace QuantConnect.Tests.Algorithm.Framework.Portfolio
             return insight;
         }
 
-        public override IPortfolioConstructionModel GetPortfolioConstructionModel(Language language, dynamic paramenter = null)
+        public override IPortfolioConstructionModel GetPortfolioConstructionModel(Language language, dynamic parameter = null)
         {
             if (language == Language.CSharp)
             {
-                return new SectorWeightingPortfolioConstructionModel(paramenter);
+                return new SectorWeightingPortfolioConstructionModel(parameter);
             }
 
             using (Py.GIL())
             {
                 const string name = nameof(SectorWeightingPortfolioConstructionModel);
-                var instance = Py.Import(name).GetAttr(name).Invoke(((object)paramenter).ToPython());
+                var instance = Py.Import(name).GetAttr(name).Invoke(((object)parameter).ToPython());
                 return new PortfolioConstructionModelPythonWrapper(instance);
             }
         }

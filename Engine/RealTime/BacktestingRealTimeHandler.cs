@@ -35,7 +35,7 @@ namespace QuantConnect.Lean.Engine.RealTime
         private List<ScheduledEvent> _scheduledEventsSortedByTime = new List<ScheduledEvent>();
 
         /// <summary>
-        /// Flag indicating the hander thread is completely finished and ready to dispose.
+        /// Flag indicating the handler thread is completely finished and ready to dispose.
         /// this doesn't run as its own thread
         /// </summary>
         public override bool IsActive { get; protected set; }
@@ -87,8 +87,7 @@ namespace QuantConnect.Lean.Engine.RealTime
         /// <param name="scheduledEvent">The event to be removed</param>
         public override void Remove(ScheduledEvent scheduledEvent)
         {
-            int id;
-            ScheduledEvents.TryRemove(scheduledEvent, out id);
+            ScheduledEvents.TryRemove(scheduledEvent, out _);
 
             _sortingScheduledEventsRequired = true;
         }

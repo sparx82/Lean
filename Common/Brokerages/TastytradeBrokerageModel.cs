@@ -88,7 +88,10 @@ namespace QuantConnect.Brokerages
         /// <returns>True if the brokerage could process the order, false otherwise</returns>
         public override bool CanSubmitOrder(Security security, Order order, out BrokerageMessageEvent message)
         {
-            message = default;
+            if (!this.ValidateContingentOrdersNotSupported(order, out message))
+            {
+                return false;
+            }
 
             if (!_supportSecurityTypes.Contains(security.Type))
             {

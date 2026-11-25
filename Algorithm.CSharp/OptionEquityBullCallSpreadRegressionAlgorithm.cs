@@ -59,14 +59,14 @@ namespace QuantConnect.Algorithm.CSharp
                     var expectedMarginUsage = Math.Max((longCall.Strike - shortCall.Strike) * Securities[longCall.Symbol].SymbolProperties.ContractMultiplier * 5, 0);
                     if (expectedMarginUsage != Portfolio.TotalMarginUsed)
                     {
-                        throw new RegressionTestException("Unexpect margin used!");
+                        throw new RegressionTestException("Unexpected margin used!");
                     }
 
-                    // we payed the ask and value using the assets price
+                    // we paid the ask and value using the assets price
                     var priceSpreadDifference = GetPriceSpreadDifference(longCall.Symbol, shortCall.Symbol);
                     if (initialMargin != (freeMarginPostTrade + expectedMarginUsage + _paidFees - priceSpreadDifference))
                     {
-                        throw new RegressionTestException("Unexpect margin remaining!");
+                        throw new RegressionTestException("Unexpected margin remaining!");
                     }
                 }
             }
@@ -99,7 +99,7 @@ namespace QuantConnect.Algorithm.CSharp
             {"Drawdown", "0%"},
             {"Expectancy", "0"},
             {"Start Equity", "200000"},
-            {"End Equity", "199145.5"},
+            {"End Equity", "199143.5"},
             {"Net Profit", "0%"},
             {"Sharpe Ratio", "0"},
             {"Sortino Ratio", "0"},
@@ -114,7 +114,7 @@ namespace QuantConnect.Algorithm.CSharp
             {"Information Ratio", "0"},
             {"Tracking Error", "0"},
             {"Treynor Ratio", "0"},
-            {"Total Fees", "$4.50"},
+            {"Total Fees", "$6.50"},
             {"Estimated Strategy Capacity", "$5400000.00"},
             {"Lowest Capacity Asset", "GOOCV WBGM95TALCX2|GOOCV VP83T1ZUHROL"},
             {"Portfolio Turnover", "28.20%"},

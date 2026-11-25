@@ -185,7 +185,7 @@ namespace QuantConnect.Indicators
         /// <returns>True if this indicator is ready, false otherwise</returns>
         public override bool Update(IBaseData input)
         {
-            T _previousSymbolInput = default(T);
+            T _previousSymbolInput;
             if (_previousInput.TryGetValue(input.Symbol.ID, out _previousSymbolInput) && input.EndTime < _previousSymbolInput.EndTime)
             {
                 if (!_loggedForwardOnlyIndicatorError)
@@ -217,7 +217,7 @@ namespace QuantConnect.Indicators
                 var nextResult = ValidateAndComputeNextValue((T)input);
                 if (nextResult.Status == IndicatorStatus.Success)
                 {
-                    Current = new IndicatorDataPoint(input.Symbol, input.EndTime, nextResult.Value);
+                    Current = new IndicatorDataPoint(input.Symbol, GetValueEndTime((T)input), nextResult.Value);
 
                     // let others know we've produced a new data point
                     OnUpdated(Current);
@@ -273,6 +273,16 @@ namespace QuantConnect.Indicators
         protected abstract decimal ComputeNextValue(T input);
 
         /// <summary>
+        /// Gets the end time of the value this indicator computes from the given input: by default, the input's end time
+        /// </summary>
+        /// <param name="input">The input given to the indicator</param>
+        /// <returns>The end time of the indicator's value</returns>
+        protected virtual DateTime GetValueEndTime(T input)
+        {
+            return input.EndTime;
+        }
+
+        /// <summary>
         /// Computes the next value of this indicator from the given state
         /// and returns an instance of the <see cref="IndicatorResult"/> class
         /// </summary>
@@ -293,9 +303,9 @@ namespace QuantConnect.Indicators
         /// <param name="obj">The object to compare with the current object. </param>
         public override bool Equals(object obj)
         {
-            // this implementation acts as a liason to prevent inconsistency between the operators
+            // this implementation acts as a liaison to prevent inconsistency between the operators
             // == and != against primitive types. the core impl for equals between two indicators
-            // is still reference equality, however, when comparing value types (floats/int, ect..)
+            // is still reference equality, however, when comparing value types (floats/int, etc..)
             // we'll use value type semantics on Current.Value
             // because of this, we shouldn't need to override GetHashCode as well since we're still
             // solely relying on reference semantics (think hashset/dictionary impls)

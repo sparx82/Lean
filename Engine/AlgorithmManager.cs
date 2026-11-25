@@ -101,7 +101,8 @@ namespace QuantConnect.Lean.Engine
             // initialize the time limit manager
             TimeLimit = new AlgorithmTimeLimitManager(
                 CreateTokenBucket(job?.Controls?.TrainingLimits),
-                TimeSpan.FromMinutes(Config.GetDouble("algorithm-manager-time-loop-maximum", 20))
+                TimeSpan.FromMinutes(Config.GetDouble("algorithm-manager-time-loop-maximum", 20)),
+                TimeSpan.FromMinutes(Config.GetDouble("algorithm-manager-time-loop-warning", 3))
             );
         }
 
@@ -123,6 +124,8 @@ namespace QuantConnect.Lean.Engine
             //Initialize:
             _algorithm = algorithm;
             _performanceTrackingTool = performanceTrackingTool;
+            // surface time limit warnings in the user's logs, not just the engine log
+            TimeLimit.UserWarningHandler = results.DebugMessage;
 
             var token = cancellationTokenSource.Token;
             _cancellationTokenSource = cancellationTokenSource;
@@ -166,7 +169,7 @@ namespace QuantConnect.Lean.Engine
                     results.Sample(algorithm.UtcTime);
                 });
 
-            //Loop over the queues: get a data collection, then pass them all into relevent methods in the algorithm.
+            //Loop over the queues: get a data collection, then pass them all into relevant methods in the algorithm.
             Log.Trace($"AlgorithmManager.Run(): Begin DataStream - Start: {algorithm.StartDate} Stop: {algorithm.EndDate} Time: {algorithm.Time} Warmup: {algorithm.IsWarmingUp}");
             var wasWarmingUp = algorithm.IsWarmingUp;
             void CheckWarmupFinished()
@@ -711,7 +714,7 @@ namespace QuantConnect.Lean.Engine
                 algorithm.OnWarmupFinished();
             }
 
-            // bellow we compare with slice.Time which is in UTC
+            // below we compare with slice.Time which is in UTC
             var startTimeTicks = algorithm.UtcTime.Ticks;
             var warmupEndTicks = algorithm.StartDate.ConvertToUtc(algorithm.TimeZone).Ticks;
 
@@ -957,7 +960,7 @@ namespace QuantConnect.Lean.Engine
                 var latestMarketOnCloseTimeRoundedDownByResolution = nextMarketClose.Subtract(MarketOnCloseOrder.SubmissionTimeBuffer)
                     .RoundDownInTimeZone(configs.GetHighestResolution().ToTimeSpan(), security.Exchange.TimeZone, configs.First().DataTimeZone);
 
-                // we don't need to do anyhing until the market closes
+                // we don't need to do anything until the market closes
                 if (security.LocalTime < latestMarketOnCloseTimeRoundedDownByResolution) continue;
 
                 // Skip processing split warnings during warmup

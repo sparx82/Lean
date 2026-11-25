@@ -82,6 +82,8 @@ namespace QuantConnect.Tests.Common.Securities
         [TestCase("GF", Market.CME, 100)]
         [TestCase("HE", Market.CME, 100)]
         [TestCase("LE", Market.CME, 100)]
+
+        [TestCase("SB", Market.ICE, 100)]
         public void LoadsPriceMagnifier(string ticker, string market, int expectedPriceMagnifier)
         {
             var db = SymbolPropertiesDatabase.FromDataFolder();
@@ -175,7 +177,7 @@ namespace QuantConnect.Tests.Common.Securities
             Assert.AreEqual(Market.FXCM, market);
 
             // Change the data folder so another symbol properties file is used
-            var originalDataFolder = Config.Get("data-folder");
+            var originalDataFolder = Globals.DataFolder;
             Config.Set("data-folder", "./TestData");
             Globals.Reset();
 
@@ -513,8 +515,7 @@ namespace QuantConnect.Tests.Common.Securities
                 "0.01",
                 "1");
 
-            SecurityDatabaseKey key;
-            Assert.DoesNotThrow(() => TestingSymbolPropertiesDatabase.TestFromCsvLine(line, out key));
+            Assert.DoesNotThrow(() => TestingSymbolPropertiesDatabase.TestFromCsvLine(line, out _));
         }
 
         [Test]

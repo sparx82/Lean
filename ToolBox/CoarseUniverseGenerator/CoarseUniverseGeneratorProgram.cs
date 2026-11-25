@@ -129,7 +129,7 @@ namespace QuantConnect.ToolBox.CoarseUniverseGenerator
                 blackListedTickers = File.ReadAllLines(_blackListedTickersFile.FullName).ToHashSet();
             }
 
-            var securityIdentifierContexts = PopulateSidContex(mapFileResolver, blackListedTickers);
+            var securityIdentifierContexts = PopulateSidContext(mapFileResolver, blackListedTickers);
             var dailyPricesByTicker = new ConcurrentDictionary<string, List<TradeBar>>();
             var outputCoarseContent = new ConcurrentDictionary<DateTime, List<CoarseFundamental>>();
 
@@ -182,8 +182,10 @@ namespace QuantConnect.ToolBox.CoarseUniverseGenerator
                             continue;
                         }
 
-                        // Get daily data only for the time the ticker was
-                        foreach (var tradeBar in tickerDailyData.Where(tb => tb.Time >= startDate && tb.Time <= endDate))
+                        // Get daily data only for the time the ticker was. A map file row date is the last date its ticker
+                        // applies, so it is covered by the epoch ending on it: the start date is only inclusive for the first epoch
+                        var inclusiveStart = mapFileRowIndex == 1;
+                        foreach (var tradeBar in tickerDailyData.Where(tb => (inclusiveStart ? tb.Time >= startDate : tb.Time > startDate) && tb.Time <= endDate))
                         {
                             var coarseFundamental = GenerateFactorFileRow(ticker, sidContext, factorFile as CorporateFactorProvider, tradeBar);
                             coarseForSecurity.Add(coarseFundamental);
@@ -317,14 +319,14 @@ namespace QuantConnect.ToolBox.CoarseUniverseGenerator
         }
 
         /// <summary>
-        /// Populates the sid contex.
+        /// Populates the sid context.
         /// </summary>
         /// <param name="mapFileResolver">The map file resolver.</param>
         /// <param name="exclusions">The exclusions.</param>
         /// <returns></returns>
-        private IEnumerable<SecurityIdentifierContext> PopulateSidContex(MapFileResolver mapFileResolver, HashSet<string> exclusions)
+        private IEnumerable<SecurityIdentifierContext> PopulateSidContext(MapFileResolver mapFileResolver, HashSet<string> exclusions)
         {
-            Log.Trace("CoarseUniverseGeneratorProgram.PopulateSidContex(): Generating SID context from QuantQuote's map files.");
+            Log.Trace("CoarseUniverseGeneratorProgram.PopulateSidContext(): Generating SID context from QuantQuote's map files.");
             foreach (var mapFile in mapFileResolver)
             {
                 if (exclusions.Contains(mapFile.Last().MappedSymbol))

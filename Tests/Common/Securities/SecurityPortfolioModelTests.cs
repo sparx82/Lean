@@ -87,6 +87,28 @@ namespace QuantConnect.Tests.Common.Securities
             Assert.AreEqual(0, security.Holdings.LastTradeProfit);
         }
 
+        [TestCase(OrderStatus.Filled, 100, OrderDirection.Sell)]
+        [TestCase(OrderStatus.PartiallyFilled, 100, OrderDirection.Sell)]
+        [TestCase(OrderStatus.Filled, -100, OrderDirection.Buy)]
+        [TestCase(OrderStatus.PartiallyFilled, -100, OrderDirection.Buy)]
+        public void FillWithoutQuantityDoesNotAddTransactionRecord(OrderStatus status, int holdingsQuantity, OrderDirection orderDirection)
+        {
+            var reference = new DateTime(2016, 02, 16, 11, 53, 30);
+            var security = InitializeTest(reference, out var portfolio);
+
+            security.Holdings.SetHoldings(50m, holdingsQuantity);
+
+            // the brokerage closes the order short of its quantity after its last fill was reported
+            var fill = new OrderEvent(1, security.Symbol, reference, status, orderDirection, 0, 0, OrderFee.Zero);
+            portfolio.ProcessFills(new List<OrderEvent> { fill });
+
+            Assert.AreEqual(0, portfolio.Transactions.WinCount);
+            Assert.AreEqual(0, portfolio.Transactions.LossCount);
+            Assert.AreEqual(0, portfolio.Transactions.TransactionRecord.Count);
+            Assert.AreEqual(holdingsQuantity, security.Holdings.Quantity);
+            Assert.AreEqual(50m, security.Holdings.AveragePrice);
+        }
+
         [Test]
         public void LastTradeProfit_LongToFlat()
         {
@@ -125,7 +147,7 @@ namespace QuantConnect.Tests.Common.Securities
             portfolio.ProcessFills(new List<OrderEvent> {fill});
 
             // we can only take 'profit' on the closing part of the position, so we closed 100
-            // shares and opened a new for the second 100, so ony the frst 100 go into the calculation
+            // shares and opened a new for the second 100, so only the first 100 go into the calculation
             // bought @50 and sold @100 = (-50*100)+(100*100 - 1) = 4999
             // current implementation doesn't back out fees.
             Assert.AreEqual(5000m, security.Holdings.LastTradeProfit);
@@ -172,6 +194,7 @@ namespace QuantConnect.Tests.Common.Securities
             Assert.AreEqual(-5000m, security.Holdings.LastTradeProfit);
         }
 
+        [Test]
         public void LastTradeProfit_ShortToLong()
         {
             var reference = new DateTime(2016, 02, 16, 11, 53, 30);
@@ -188,7 +211,7 @@ namespace QuantConnect.Tests.Common.Securities
             portfolio.ProcessFills(new List<OrderEvent> {fill});
 
             // we can only take 'profit' on the closing part of the position, so we closed 100
-            // shares and opened a new for the second 100, so ony the frst 100 go into the calculation
+            // shares and opened a new for the second 100, so only the first 100 go into the calculation
             // sold @50 and bought @100 = (50*100)+(-100*100 - 1) = -5001
             // current implementation doesn't back out fees.
             Assert.AreEqual(-5000m, security.Holdings.LastTradeProfit);
@@ -642,7 +665,7 @@ namespace QuantConnect.Tests.Common.Securities
 
             option.SetMarketPrice(new Tick { Value = 100m });
 
-            var underlyingPrice = 0m;
+            decimal underlyingPrice;
             if (win)
             {
                 underlyingPrice = orderDirection == OrderDirection.Buy ? 300m : 290m;
@@ -768,7 +791,7 @@ namespace QuantConnect.Tests.Common.Securities
             Assert.AreEqual(0, portfolio.Transactions.LossCount);
 
             // Before closing, update option market price
-            var finalOptionPrice = 0m;
+            decimal finalOptionPrice;
             if (win)
             {
                 finalOptionPrice = orderDirection == OrderDirection.Buy ? 150m : 50m;

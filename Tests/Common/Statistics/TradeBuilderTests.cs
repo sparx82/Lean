@@ -15,14 +15,17 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
+using QuantConnect.Securities.CryptoFuture;
 using QuantConnect.Securities.Option;
 using QuantConnect.Statistics;
+using QuantConnect.Tests.Engine.DataFeeds;
 
 namespace QuantConnect.Tests.Common.Statistics
 {
@@ -38,6 +41,354 @@ namespace QuantConnect.Tests.Common.Statistics
         public void SetUp()
         {
             _securityManager = new SecurityManager(new TimeKeeper(_startTime));
+        }
+
+        [TestCaseSource(nameof(CryptoFutureTradeCases))]
+        public void CryptoFutureTradeProfitLoss(string ticker, string market, decimal quantity, decimal expectedProfit,
+            FillGroupingMethod groupingMethod, int direction)
+        {
+            var builder = CreateCryptoFutureTradeBuilder(ticker, groupingMethod, FillMatchingMethod.FIFO, out var security, market);
+            var rate = security.QuoteCurrency.ConversionRate;
+            var multiplier = security.SymbolProperties.ContractMultiplier;
+            security.BaseCurrency.ConversionRate = 40000m;
+            builder.ProcessFill(new OrderEvent(1, security.Symbol, _startTime, OrderStatus.Filled,
+                direction > 0 ? OrderDirection.Buy : OrderDirection.Sell, 40000m, direction * quantity, _orderFee),
+                rate, 1m, multiplier);
+            security.BaseCurrency.ConversionRate = 44000m;
+            builder.ProcessFill(new OrderEvent(2, security.Symbol, _startTime.AddHours(1), OrderStatus.Filled,
+                direction > 0 ? OrderDirection.Sell : OrderDirection.Buy, 44000m, -direction * quantity, _orderFee),
+                rate, 1m, multiplier);
+
+            var trade = builder.ClosedTrades[0];
+            Assert.AreEqual(1, builder.ClosedTrades.Count);
+            Assert.AreEqual(direction * expectedProfit, trade.ProfitLoss);
+            Assert.AreEqual(40000m, trade.EntryPrice);
+            Assert.AreEqual(44000m, trade.ExitPrice);
+            Assert.AreEqual(quantity, trade.Quantity);
+            Assert.AreEqual(2m, trade.TotalFees);
+            Assert.AreEqual(direction > 0, trade.IsWin);
+            Assert.IsFalse(builder.HasOpenPosition(security.Symbol));
+        }
+
+        [Test]
+        public void InverseCryptoFutureExcursions([Values(-1, 1)] int direction,
+            [Values(1.0, 0.8)] double accountRate)
+        {
+            var builder = CreateCryptoFutureTradeBuilder("BTCUSD", FillGroupingMethod.FillToFill, FillMatchingMethod.FIFO,
+                out var security, accountCurrency: accountRate == 1.0 ? Currencies.USD : "EUR");
+            var adverse = direction > 0 ? -11000m / 9 : -2200m;
+            var favorable = direction > 0 ? 2200m : 11000m / 9;
+            var drawdown = direction > 0 ? 30800m / 9 : 20000m / 9;
+            var rate = (decimal)accountRate;
+            security.BaseCurrency.ConversionRate = 44000m * rate;
+            security.QuoteCurrency.ConversionRate = rate;
+            builder.ProcessFill(new OrderEvent(1, security.Symbol, _startTime, OrderStatus.Filled,
+                direction > 0 ? OrderDirection.Buy : OrderDirection.Sell, 40000m, direction * 100m, OrderFee.Zero),
+                rate, 0m, 100m);
+            builder.SetMarketPrice(security.Symbol, 50000m);
+            builder.SetMarketPrice(security.Symbol, 36000m);
+            builder.ProcessFill(new OrderEvent(2, security.Symbol, _startTime.AddHours(1), OrderStatus.Filled,
+                direction > 0 ? OrderDirection.Sell : OrderDirection.Buy, 44000m, -direction * 100m, OrderFee.Zero),
+                rate, 0m, 100m);
+
+            var trade = builder.ClosedTrades[0];
+            Assert.AreEqual(direction * 1000m * rate, trade.ProfitLoss);
+            Assert.AreEqual((adverse * rate).SmartRounding(), trade.MAE);
+            Assert.AreEqual((favorable * rate).SmartRounding(), trade.MFE);
+            Assert.AreEqual((drawdown * rate).SmartRounding(), trade.EndTradeDrawdown);
+        }
+
+        [Test]
+        public void InverseCryptoFutureIgnoresZeroMarketPrice()
+        {
+            var builder = CreateCryptoFutureTradeBuilder("BTCUSD", FillGroupingMethod.FillToFill, FillMatchingMethod.FIFO, out var security);
+            builder.ProcessFill(new OrderEvent(1, security.Symbol, _startTime, OrderStatus.Filled, OrderDirection.Buy, 40000m, 100m, OrderFee.Zero),
+                1m, 0m, 100m);
+            builder.SetMarketPrice(security.Symbol, 0m);
+            builder.ProcessFill(new OrderEvent(2, security.Symbol, _startTime.AddHours(1), OrderStatus.Filled, OrderDirection.Sell, 44000m, -100m, OrderFee.Zero),
+                1m, 0m, 100m);
+
+            var trade = builder.ClosedTrades[0];
+            Assert.AreEqual(1000m, trade.ProfitLoss);
+            Assert.AreEqual(0m, trade.MAE);
+            Assert.AreEqual(0m, trade.EndTradeDrawdown);
+        }
+
+        [Test]
+        public void InverseCryptoFutureScaleInAndPartialExit([Values] FillGroupingMethod groupingMethod,
+            [Values] FillMatchingMethod matchingMethod, [Values(-1, 1)] int direction)
+        {
+            var builder = CreateCryptoFutureTradeBuilder("BTCUSD", groupingMethod, matchingMethod, out var security);
+            var prices = new[] { 40000m, 50000m, 44000m, 48000m };
+            for (var i = 0; i < prices.Length; i++)
+            {
+                var quantity = (i < 2 ? 100m : -100m) * direction;
+                builder.ProcessFill(new OrderEvent(i + 1, security.Symbol, _startTime.AddMinutes(i), OrderStatus.Filled,
+                    quantity > 0 ? OrderDirection.Buy : OrderDirection.Sell, prices[i], quantity, OrderFee.Zero),
+                    1m, 0m, 100m);
+            }
+
+            var totalProfit = 0m;
+            foreach (var trade in builder.ClosedTrades)
+            {
+                totalProfit += trade.ProfitLoss;
+            }
+            // each trade is rounded on its own, so their sum is exact only up to that rounding
+            Assert.That(totalProfit, Is.EqualTo(direction * 1900m / 3).Within(0.001m));
+            Assert.IsFalse(builder.HasOpenPosition(security.Symbol));
+            if (groupingMethod == FillGroupingMethod.FlatToFlat)
+            {
+                Assert.AreEqual(45000m, builder.ClosedTrades[0].EntryPrice);
+                Assert.AreEqual(46000m, builder.ClosedTrades[0].ExitPrice);
+            }
+        }
+
+        [Test]
+        public void KeepsAccountCurrencyPrecision([Values] FillGroupingMethod groupingMethod)
+        {
+            // a USD-quoted security in a BTC account: $1 is 0.000025 BTC
+            const decimal usdToBtc = 0.000025m;
+            var builder = new TradeBuilder(groupingMethod, FillMatchingMethod.FIFO);
+            builder.ProcessFill(new OrderEvent(1, Symbols.SPY, _startTime, OrderStatus.Filled, OrderDirection.Buy, 100m, 1m, OrderFee.Zero),
+                usdToBtc, 0m);
+            builder.SetMarketPrice(Symbols.SPY, 95m);
+            builder.SetMarketPrice(Symbols.SPY, 112m);
+            builder.ProcessFill(new OrderEvent(2, Symbols.SPY, _startTime.AddHours(1), OrderStatus.Filled, OrderDirection.Sell, 110m, -1m, OrderFee.Zero),
+                usdToBtc, 0m);
+
+            var trade = builder.ClosedTrades.Single();
+            Assert.AreEqual(0.00025m, trade.ProfitLoss);
+            Assert.IsTrue(trade.IsWin);
+            if (groupingMethod == FillGroupingMethod.FillToFill)
+            {
+                Assert.AreEqual(-0.000125m, trade.MAE);
+                Assert.AreEqual(0.0003m, trade.MFE);
+                Assert.AreEqual(0.000125m, trade.EndTradeDrawdown);
+            }
+        }
+
+        // entry cost and exit proceeds are equal, but averaging the fills leaves decimal residue
+        [TestCase(FillGroupingMethod.FlatToFlat, new[] { 1.0, 2, 1, -4 }, new[] { 3.0, 11, 1, 6.5 })]
+        [TestCase(FillGroupingMethod.FlatToReduced, new[] { 1.0, 2, 1, -4 }, new[] { 3.0, 11, 1, 6.5 })]
+        [TestCase(FillGroupingMethod.FlatToFlat, new[] { 9.0, 4, 5, -4, -5, -9 }, new[] { 1.0, 18, 4, 18, 4, 1 })]
+        // the closing fill also reverses the position, which a final fill flattens at the same price
+        [TestCase(FillGroupingMethod.FlatToFlat, new[] { 3.0, -9, 6 }, new[] { 50.0, 50, 50 })]
+        [TestCase(FillGroupingMethod.FlatToFlat, new[] { 1.0, 2, 1, -6, 2 }, new[] { 3.0, 11, 1, 6.5, 6.5 })]
+        // an inverse contract's reciprocal prices aren't exact decimals: 48000 is the harmonic mean of 40000 and 60000
+        [TestCase(FillGroupingMethod.FlatToFlat, new[] { 100.0, 100, -200 }, new[] { 40000.0, 60000, 48000 }, "BTCUSD")]
+        [TestCase(FillGroupingMethod.FlatToFlat, new[] { -100.0, -100, 200 }, new[] { 40000.0, 60000, 48000 }, "BTCUSD")]
+        [TestCase(FillGroupingMethod.FlatToReduced, new[] { 100.0, 100, -200 }, new[] { 40000.0, 60000, 48000 }, "BTCUSD")]
+        [TestCase(FillGroupingMethod.FlatToReduced, new[] { -100.0, -100, 200 }, new[] { 40000.0, 60000, 48000 }, "BTCUSD")]
+        public void BreakevenAveragedFillsHaveZeroProfit(FillGroupingMethod groupingMethod, double[] quantities, double[] prices,
+            string inverseCryptoFuture = null)
+        {
+            foreach (var matchingMethod in new[] { FillMatchingMethod.FIFO, FillMatchingMethod.LIFO })
+            {
+                var builder = new TradeBuilder(groupingMethod, matchingMethod);
+                var symbol = Symbols.SPY;
+                var multiplier = 1m;
+                if (inverseCryptoFuture != null)
+                {
+                    builder = CreateCryptoFutureTradeBuilder(inverseCryptoFuture, groupingMethod, matchingMethod, out var security);
+                    symbol = security.Symbol;
+                    multiplier = security.SymbolProperties.ContractMultiplier;
+                }
+                var time = _startTime;
+                for (var i = 0; i < quantities.Length; i++)
+                {
+                    var quantity = (decimal)quantities[i];
+                    builder.ProcessFill(new OrderEvent(i + 1, symbol, time = time.AddMinutes(1), OrderStatus.Filled,
+                        quantity > 0 ? OrderDirection.Buy : OrderDirection.Sell, (decimal)prices[i], quantity, OrderFee.Zero), 1m, 0m, multiplier);
+                }
+                builder.ProcessFill(new OrderEvent(100, symbol, time.AddMinutes(1), OrderStatus.Filled, OrderDirection.Buy, 100m, 1000m, OrderFee.Zero), 1m, 0m, multiplier);
+                builder.ProcessFill(new OrderEvent(101, symbol, time.AddMinutes(2), OrderStatus.Filled, OrderDirection.Sell, 110m, -1000m, OrderFee.Zero), 1m, 0m, multiplier);
+
+                foreach (var breakeven in builder.ClosedTrades.SkipLast(1))
+                {
+                    Assert.AreEqual(0m, breakeven.ProfitLoss);
+                    Assert.IsFalse(breakeven.IsWin);
+                }
+                Assert.Greater(builder.ClosedTrades[^1].ProfitLoss, 0m);
+                Assert.DoesNotThrow(() => new TradeStatistics(builder.ClosedTrades));
+            }
+        }
+
+        private static IEnumerable<TestCaseData> CryptoFutureTradeCases
+        {
+            get
+            {
+                foreach (var grouping in Enum.GetValues<FillGroupingMethod>())
+                {
+                    foreach (var direction in new[] { -1, 1 })
+                    {
+                        yield return new TestCaseData("BTCUSD", Market.Binance, 100m, 1000m, grouping, direction);
+                        yield return new TestCaseData("BTCUSDT", Market.Binance, 1m, 4000m, grouping, direction);
+                        yield return new TestCaseData("BTCUSD", Market.DYDX, 1m, 4000m, grouping, direction);
+                        yield return new TestCaseData("BTCUSD", Market.Bybit, 100m, 10m, grouping, direction);
+                        yield return new TestCaseData("ETHBTC", Market.Binance, 1m, 4000m, grouping, direction);
+                        yield return new TestCaseData("BTCUSD1", Market.Binance, 1m, 4000m, grouping, direction);
+                        yield return new TestCaseData("BTCU", Market.Binance, 1m, 4000m, grouping, direction);
+                    }
+                }
+            }
+        }
+
+        private static TradeBuilder CreateCryptoFutureTradeBuilder(string ticker, FillGroupingMethod groupingMethod,
+            FillMatchingMethod matchingMethod, out CryptoFuture security, string market = Market.Binance,
+            string accountCurrency = Currencies.USD)
+        {
+            var algorithm = new AlgorithmStub();
+            algorithm.SetAccountCurrency(accountCurrency);
+            security = algorithm.AddCryptoFuture(ticker, market: market);
+            security.BaseCurrency.ConversionRate = 44000m;
+            security.QuoteCurrency.ConversionRate = 1m;
+            var builder = new TradeBuilder(groupingMethod, matchingMethod);
+            builder.SetSecurityManager(algorithm.Securities);
+            return builder;
+        }
+
+        [Test]
+        public void FillWithoutQuantityIsIgnored(
+            [Values] FillGroupingMethod groupingMethod,
+            [Values] FillMatchingMethod matchingMethod,
+            [Values(OrderStatus.Filled, OrderStatus.PartiallyFilled)] OrderStatus status)
+        {
+            var builder = new TradeBuilder(groupingMethod, matchingMethod);
+            builder.SetSecurityManager(_securityManager);
+            var time = _startTime;
+
+            builder.ProcessFill(
+                new OrderEvent(1, Symbols.SPY, time, OrderStatus.PartiallyFilled, OrderDirection.Buy,
+                    fillPrice: 300m, fillQuantity: 2, orderFee: _orderFee),
+                ConversionRate, _orderFee.Value.Amount);
+
+            // the brokerage closes the order short of its quantity after its last fill was reported
+            builder.ProcessFill(
+                new OrderEvent(1, Symbols.SPY, time.AddMinutes(1), status, OrderDirection.Buy,
+                    fillPrice: 0m, fillQuantity: 0, orderFee: OrderFee.Zero),
+                ConversionRate, 0m);
+
+            // a zero quantity event with no open position does not open a trade either
+            builder.ProcessFill(
+                new OrderEvent(3, Symbols.AAPL, time.AddMinutes(1), status, OrderDirection.Sell,
+                    fillPrice: 0m, fillQuantity: 0, orderFee: OrderFee.Zero),
+                ConversionRate, 0m);
+            Assert.IsFalse(builder.HasOpenPosition(Symbols.AAPL));
+
+            builder.ProcessFill(
+                new OrderEvent(2, Symbols.SPY, time.AddMinutes(10), OrderStatus.Filled, OrderDirection.Sell,
+                    fillPrice: 301m, fillQuantity: -2, orderFee: _orderFee),
+                ConversionRate, _orderFee.Value.Amount);
+
+            Assert.IsFalse(builder.HasOpenPosition(Symbols.SPY));
+            Assert.AreEqual(1, builder.ClosedTrades.Count);
+
+            var trade = builder.ClosedTrades[0];
+            Assert.AreEqual(2, trade.Quantity);
+            Assert.AreEqual(300m, trade.EntryPrice);
+            Assert.AreEqual(301m, trade.ExitPrice);
+            Assert.AreEqual(2m, trade.ProfitLoss);
+            Assert.AreEqual(0m, trade.MAE);
+            Assert.AreEqual(0m, trade.EndTradeDrawdown);
+        }
+
+        [Test]
+        public void CommissionReportedAfterFirstExecutionIsAssignedToTrade(
+            [Values] FillGroupingMethod groupingMethod,
+            [Values] FillMatchingMethod matchingMethod,
+            [Values] bool commissionWithExecution,
+            [Values] bool commissionOnExitOrder)
+        {
+            var builder = new TradeBuilder(groupingMethod, matchingMethod);
+            builder.SetSecurityManager(_securityManager);
+            var time = _startTime;
+            var commissionOrderId = commissionOnExitOrder ? 2 : 1;
+            var direction = commissionOnExitOrder ? -1 : 1;
+            var price = commissionOnExitOrder ? 301m : 300m;
+
+            if (commissionOnExitOrder)
+            {
+                builder.ProcessFill(
+                    new OrderEvent(1, Symbols.SPY, time, OrderStatus.Filled, OrderDirection.Buy,
+                        fillPrice: 300m, fillQuantity: 2, orderFee: OrderFee.Zero),
+                    ConversionRate, 0m);
+            }
+
+            builder.ProcessFill(
+                new OrderEvent(commissionOrderId, Symbols.SPY, time.AddMinutes(1), OrderStatus.PartiallyFilled,
+                    commissionOnExitOrder ? OrderDirection.Sell : OrderDirection.Buy,
+                    fillPrice: price, fillQuantity: direction, orderFee: OrderFee.Zero),
+                ConversionRate, 0m);
+
+            // the commission arrives with the order's last execution, or with an event closing the order without one
+            builder.ProcessFill(
+                new OrderEvent(commissionOrderId, Symbols.SPY, time.AddMinutes(2), OrderStatus.Filled,
+                    commissionOnExitOrder ? OrderDirection.Sell : OrderDirection.Buy,
+                    fillPrice: commissionWithExecution ? price : 0m, fillQuantity: commissionWithExecution ? direction : 0,
+                    orderFee: _orderFee),
+                ConversionRate, _orderFee.Value.Amount);
+
+            // a repeated report of the same commission is not counted again
+            builder.ProcessFill(
+                new OrderEvent(commissionOrderId, Symbols.SPY, time.AddMinutes(3), OrderStatus.Filled,
+                    commissionOnExitOrder ? OrderDirection.Sell : OrderDirection.Buy,
+                    fillPrice: 0m, fillQuantity: 0, orderFee: _orderFee),
+                ConversionRate, _orderFee.Value.Amount);
+
+            var orderQuantity = commissionWithExecution ? 2 : 1;
+            var tradedQuantity = commissionOnExitOrder ? 2 : orderQuantity;
+            // closes what is left open
+            builder.ProcessFill(
+                new OrderEvent(3, Symbols.SPY, time.AddMinutes(4), OrderStatus.Filled, OrderDirection.Sell,
+                    fillPrice: 301m, fillQuantity: commissionOnExitOrder ? orderQuantity - 2 : -orderQuantity,
+                    orderFee: OrderFee.Zero),
+                ConversionRate, 0m);
+
+            Assert.IsFalse(builder.HasOpenPosition(Symbols.SPY));
+            var trades = builder.ClosedTrades;
+            Assert.AreEqual(_orderFee.Value.Amount, trades.Sum(trade => trade.TotalFees));
+            Assert.AreEqual(tradedQuantity, trades.Sum(trade => trade.Quantity));
+            Assert.AreEqual(tradedQuantity, trades.Sum(trade => trade.ProfitLoss));
+            // the event without an execution is no market price
+            Assert.IsTrue(trades.All(trade => trade.MAE == 0m));
+        }
+
+        [Test]
+        public void CommissionReportedAfterTradeClosedKeepsCapturedResultsConsistent(
+            [Values] FillGroupingMethod groupingMethod,
+            [Values] FillMatchingMethod matchingMethod)
+        {
+            var builder = new TradeBuilder(groupingMethod, matchingMethod);
+            builder.SetSecurityManager(_securityManager);
+            var time = _startTime;
+
+            builder.ProcessFill(
+                new OrderEvent(1, Symbols.SPY, time, OrderStatus.Filled, OrderDirection.Buy,
+                    fillPrice: 300m, fillQuantity: 2, orderFee: _orderFee),
+                ConversionRate, _orderFee.Value.Amount);
+            builder.ProcessFill(
+                new OrderEvent(2, Symbols.SPY, time.AddMinutes(1), OrderStatus.PartiallyFilled, OrderDirection.Sell,
+                    fillPrice: 301m, fillQuantity: -2, orderFee: OrderFee.Zero),
+                ConversionRate, 0m);
+
+            var capturedTrades = builder.ClosedTrades;
+            var capturedStatistics = new TradeStatistics(capturedTrades);
+
+            // the exit order's commission arrives once its trade is already closed
+            var lateCommission = new OrderFee(new CashAmount(0.01m, Currencies.USD));
+            builder.ProcessFill(
+                new OrderEvent(2, Symbols.SPY, time.AddMinutes(2), OrderStatus.Filled, OrderDirection.Sell,
+                    fillPrice: 0m, fillQuantity: 0, orderFee: lateCommission),
+                ConversionRate, lateCommission.Value.Amount);
+
+            Assert.AreEqual(1m, capturedStatistics.TotalFees);
+            Assert.AreEqual(1m, capturedTrades.Sum(trade => trade.TotalFees));
+
+            var trades = builder.ClosedTrades;
+            Assert.AreEqual(1, trades.Count);
+            Assert.AreEqual(capturedTrades[0].Id, trades[0].Id);
+            Assert.AreEqual(1.01m, trades[0].TotalFees);
+            Assert.AreEqual(1.01m, new TradeStatistics(trades).TotalFees);
         }
 
         [Test]
@@ -2611,7 +2962,7 @@ namespace QuantConnect.Tests.Common.Statistics
 
             option.SetMarketPrice(new Tick { Value = 100m });
 
-            var underlyingPrice = 0m;
+            decimal underlyingPrice;
             if (win)
             {
                 underlyingPrice = orderDirection == OrderDirection.Buy ? 300m : 290m;
@@ -2750,7 +3101,7 @@ namespace QuantConnect.Tests.Common.Statistics
             Assert.IsTrue(builder.HasOpenPosition(option.Symbol));
 
             // Before closing, update option market price
-            var finalOptionPrice = 0m;
+            decimal finalOptionPrice;
             if (win)
             {
                 finalOptionPrice = orderDirection == OrderDirection.Buy ? 150m : 50m;

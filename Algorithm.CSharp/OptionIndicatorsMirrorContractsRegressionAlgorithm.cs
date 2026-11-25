@@ -166,9 +166,7 @@ Rho: {_rho}");
             var riskFreeRate = (double)RiskFreeRate.Current.Value;
             var dividendYield = (double)DividendYield.Current.Value;
 
-            double result;
-
-            // we demonstate put-call parity calculation here, but note that it is not suitable for American options
+            // we demonstrate put-call parity calculation here, but note that it is not suitable for American options
             try
             {
                 Func<double, double> f = (vol) =>

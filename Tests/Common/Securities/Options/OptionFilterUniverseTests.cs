@@ -194,7 +194,7 @@ namespace QuantConnect.Tests.Common.Securities.Options
         }
 
         [Test]
-        public void OptionUnivereDataFiltersAreNotSupportedForFutureOptions()
+        public void OptionUniverseDataFiltersAreNotSupportedForFutureOptions()
         {
             // Set up
             var symbol = Symbols.CreateFutureOptionSymbol(Symbols.ES_Future_Chain, OptionRight.Call,
@@ -228,6 +228,18 @@ namespace QuantConnect.Tests.Common.Securities.Options
                 Assert.Throws<InvalidOperationException>(() => universe.Rho(0m, 1m));
                 Assert.Throws<InvalidOperationException>(() => universe.R(0m, 1m));
             });
+        }
+
+        [Test]
+        public void TypeFiltersMustBeAppliedBeforeExpiryFilters()
+        {
+            var universe = new OptionFilterUniverse(GetOption(), _testOptionsData, _underlying);
+            var count = universe.Count;
+
+            universe.FrontMonth();
+
+            Assert.Less(universe.Count, count);
+            Assert.Throws<InvalidOperationException>(() => universe.StandardsOnly());
         }
 
         [Test]

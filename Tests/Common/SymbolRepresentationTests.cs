@@ -194,6 +194,9 @@ namespace QuantConnect.Tests.Common
         [TestCase(Futures.Energy.NaturalGasHenryHubPenultimateFinancial, 2017, 11, 20, "HP20Z17", true)] // Prior month
         [TestCase(Futures.Energy.WTIHoustonArgusVsWTITradeMonth, 2017, 11, 20, "HTT20Z17", true)] // Prior month
         [TestCase(Futures.Energy.WTIHoustonCrudeOil, 2017, 11, 20, "HCL20Z17", true)] // Prior month
+        [TestCase(Futures.Financials.MicroUltraTenYearUSTreasuryNote, 2025, 2, 27, "MTN27H25", true)] // Prior month
+        [TestCase(Futures.Financials.MicroUltraUSTreasuryBond, 2025, 2, 27, "MWN27H25", true)] // Prior month
+        [TestCase(Futures.Metals.OneOunceGold, 2026, 1, 28, "1OZ28G26", true)] // Prior month
         [TestCase(Futures.Softs.Sugar11, 2017, 11, 20, "SB20Z17", true)] // Prior month
         [TestCase(Futures.Softs.Sugar11CME, 2017, 11, 20, "YO20Z17", true)] // Prior month
         public void GenerateFutureTickerExpiringInPreviousMonth(string underlying, int year, int month, int day, string ticker, bool doubleDigitsYear)
@@ -257,6 +260,9 @@ namespace QuantConnect.Tests.Common
         [TestCase("CLU22", 2020, "2022-08-22")]
         [TestCase("CLU28", 2020, "2028-08-22")]
         [TestCase("CLU29", 2020, "2029-08-21")]
+        // more than 10 years out, the double digit year defines the decade
+        [TestCase("CLZ36", 2026, "2036-11-20")]
+        [TestCase("CLZ33", 2026, "2033-11-22")]
         public void GenerateFutureSymbolFromTickerUnknownYearSingleDigit(string ticker, int futureYear, DateTime expectedExpiration)
         {
             var result = SymbolRepresentation.ParseFutureSymbol(ticker, futureYear);
@@ -298,6 +304,17 @@ namespace QuantConnect.Tests.Common
         {
             var result = SymbolRepresentation.ParseFutureSymbol(ticker, 1999);
             Assert.AreEqual(new DateTime(1999, 12, 17), result.ID.Date.Date);
+        }
+
+        [TestCase("ESZ05 C1200", "ESZ05")]
+        [TestCase("ESH09 P800", "ESH09")]
+        [TestCase("ESZ30 C3505", "ESZ30")]
+        public void ParseFutureOptionSymbolDoubleDigitYear(string ticker, string futureTicker)
+        {
+            var result = SymbolRepresentation.ParseFutureOptionSymbol(ticker);
+            var expectedFuture = SymbolRepresentation.ParseFutureSymbol(futureTicker);
+
+            Assert.AreEqual(expectedFuture, result.Underlying);
         }
 
         [TestCase("PROPANE_NON_LDH_MONT_BELVIEU", QuantConnect.Securities.Futures.Energy.PropaneNonLDHMontBelvieu)]

@@ -26,7 +26,9 @@ using QuantConnect.Data;
 using QuantConnect.Data.Consolidators;
 using QuantConnect.Data.Market;
 using QuantConnect.Data.UniverseSelection;
+using QuantConnect.Indicators;
 using QuantConnect.Logging;
+using QuantConnect.Python;
 using QuantConnect.Statistics;
 using QuantConnect.Tests.Engine.DataFeeds;
 using QuantConnect.Util;
@@ -658,7 +660,7 @@ def get_consolidator():
 ");
 
             var algorithm = new AlgorithmStub();
-            var symbol = algorithm.AddEquity("SPY").Symbol;
+            algorithm.AddEquity("SPY");
 
             var pyConsolidator = module.GetAttr("get_consolidator").Invoke();
 
@@ -698,7 +700,7 @@ def get_consolidator():
 ");
 
             var algorithm = new AlgorithmStub();
-            var symbol = algorithm.AddEquity("SPY").Symbol;
+            algorithm.AddEquity("SPY");
 
             var pyConsolidator = module.GetAttr("get_consolidator").Invoke();
 
@@ -707,6 +709,209 @@ def get_consolidator():
 
             algorithm.SubscriptionManager.RemoveConsolidator(Symbols.SPY, pyConsolidator);
             Assert.AreEqual(0, algorithm.SubscriptionManager.Subscriptions.Sum(x => x.Consolidators.Count));
+        }
+
+        [Test]
+        public void RemovingAPythonConsolidatorAddedTwiceUnsubscribesFromItsEvent()
+        {
+            using var _ = Py.GIL();
+            var algorithm = new AlgorithmStub();
+            var symbol = algorithm.AddEquity("SPY").Symbol;
+            using var pyConsolidator = CreateCustomTradeBarPythonConsolidator();
+            var source = pyConsolidator.As<PythonConsolidator>();
+
+            algorithm.SubscriptionManager.AddConsolidator(symbol, pyConsolidator);
+            algorithm.SubscriptionManager.AddConsolidator(symbol, pyConsolidator);
+            Assert.AreEqual(1, GetDataConsolidatedHandlerCount(source));
+
+            algorithm.SubscriptionManager.RemoveConsolidator(symbol, pyConsolidator);
+            Assert.IsEmpty(GetConsolidators(algorithm, symbol));
+            Assert.AreEqual(0, GetDataConsolidatedHandlerCount(source));
+        }
+
+        [Test]
+        public void RemovingAPythonConsolidatorSharedByIndicatorsUnsubscribesFromItsEvent()
+        {
+            using var _ = Py.GIL();
+            var algorithm = new AlgorithmStub();
+            var symbol = algorithm.AddEquity("SPY").Symbol;
+            using var pyConsolidator = CreateCustomTradeBarPythonConsolidator();
+            var source = pyConsolidator.As<PythonConsolidator>();
+
+            var sma = new SimpleMovingAverage(2);
+            var std = new StandardDeviation(2);
+            using var pySma = sma.ToPython();
+            using var pyStd = std.ToPython();
+            algorithm.RegisterIndicator(symbol, pySma, pyConsolidator);
+            algorithm.RegisterIndicator(symbol, pyStd, pyConsolidator);
+            Assert.AreEqual(1, GetDataConsolidatedHandlerCount(source));
+
+            // both indicators receive the bars the python consolidator emits
+            source.OnDataConsolidated(pyConsolidator, new TradeBar(algorithm.Time, symbol, 1, 1, 1, 1, 1, TimeSpan.FromMinutes(1)));
+            Assert.AreEqual(1, sma.Samples);
+            Assert.AreEqual(1, std.Samples);
+
+            algorithm.SubscriptionManager.RemoveConsolidator(symbol, pyConsolidator);
+            Assert.IsEmpty(GetConsolidators(algorithm, symbol));
+            Assert.AreEqual(0, GetDataConsolidatedHandlerCount(source));
+
+            source.OnDataConsolidated(pyConsolidator, new TradeBar(algorithm.Time, symbol, 1, 1, 1, 1, 1, TimeSpan.FromMinutes(1)));
+            Assert.AreEqual(1, sma.Samples);
+            Assert.AreEqual(1, std.Samples);
+        }
+
+        [Test]
+        public void DeregisteringIndicatorsSharingAPythonConsolidatorUnsubscribesFromItsEvent()
+        {
+            using var _ = Py.GIL();
+            using var module = PyModule.FromString(Guid.NewGuid().ToString(), @"
+from AlgorithmImports import *
+
+def register(algorithm, symbol, consolidator, sma, std):
+    algorithm.register_indicator(symbol, sma, consolidator)
+    algorithm.register_indicator(symbol, std, consolidator)
+
+def deregister(algorithm, sma, std):
+    algorithm.deregister_indicator(sma)
+    algorithm.deregister_indicator(std)
+");
+            var algorithm = new AlgorithmStub();
+            var symbol = algorithm.AddEquity("SPY").Symbol;
+            using var otherConsolidator = new TradeBarConsolidator(TimeSpan.FromMinutes(1));
+            algorithm.SubscriptionManager.AddConsolidator(symbol, otherConsolidator);
+            using var pyConsolidator = CreateCustomTradeBarPythonConsolidator();
+            var source = pyConsolidator.As<PythonConsolidator>();
+            using var pyAlgorithm = algorithm.ToPython();
+            using var pySymbol = symbol.ToPython();
+            using var pySma = new SimpleMovingAverage(2).ToPython();
+            using var pyStd = new StandardDeviation(2).ToPython();
+
+            module.GetAttr("register").Invoke(pyAlgorithm, pySymbol, pyConsolidator, pySma, pyStd).Dispose();
+            Assert.AreEqual(1, GetDataConsolidatedHandlerCount(source));
+
+            // the shared consolidator has not emitted a bar yet, both deregistrations remove it
+            module.GetAttr("deregister").Invoke(pyAlgorithm, pySma, pyStd).Dispose();
+
+            CollectionAssert.AreEqual(new[] { otherConsolidator }, GetConsolidators(algorithm, symbol));
+            Assert.AreEqual(0, GetDataConsolidatedHandlerCount(source));
+        }
+
+        private static PyObject CreateCustomTradeBarPythonConsolidator()
+        {
+            using var module = PyModule.FromString(Guid.NewGuid().ToString(), @"
+from AlgorithmImports import *
+
+class CustomTradeBarConsolidator(PythonConsolidator):
+    def __init__(self):
+        self.consolidated = None
+        self.working_data = None
+        self.input_type = TradeBar
+        self.output_type = TradeBar
+
+    def update(self, data):
+        pass
+
+    def scan(self, time):
+        pass
+");
+            return module.GetAttr("CustomTradeBarConsolidator").Invoke();
+        }
+
+        private static int GetDataConsolidatedHandlerCount(PythonConsolidator consolidator)
+        {
+            var handlers = (Delegate)typeof(PythonConsolidator)
+                .GetField(nameof(PythonConsolidator.DataConsolidated), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .GetValue(consolidator);
+            return handlers?.GetInvocationList().Length ?? 0;
+        }
+
+        [Test]
+        public void RemoveConsolidatorDisposesScanWrapperEvenWithoutSubscriptions()
+        {
+            var algorithm = new AlgorithmStub();
+            var symbol = algorithm.AddEquity("SPY").Symbol;
+
+            using var consolidator = new TradeBarConsolidator(TimeSpan.FromHours(1));
+            algorithm.SubscriptionManager.AddConsolidator(symbol, consolidator);
+
+            var consolidatorsField = typeof(SubscriptionManager)
+                .GetField("_consolidators", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var wrappers = (Dictionary<IDataConsolidator, ConsolidatorWrapper>)consolidatorsField.GetValue(algorithm.SubscriptionManager);
+            Assert.AreEqual(1, wrappers.Count);
+            var wrapper = wrappers[consolidator];
+
+            // the security left the universe: its subscription data configs are gone before the consolidator is removed
+            algorithm.SubscriptionManager.SetDataManager(new DataManagerStub(algorithm));
+            Assert.IsEmpty(algorithm.SubscriptionManager.SubscriptionDataConfigService.GetSubscriptionDataConfigs(symbol));
+
+            algorithm.SubscriptionManager.RemoveConsolidator(symbol, consolidator);
+
+            Assert.AreEqual(0, wrappers.Count);
+            Assert.IsTrue(wrapper.Disposed);
+        }
+
+        [Test]
+        public void RemovingAConsolidatorSharedByIndicatorsReleasesItsScanRegistration()
+        {
+            var algorithm = new AlgorithmStub();
+            algorithm.SetDateTime(new DateTime(2018, 8, 2, 16, 0, 0).ConvertToUtc(TimeZones.NewYork));
+            var symbol = algorithm.AddEquity("SPY").Symbol;
+            var manager = algorithm.SubscriptionManager;
+            var scanQueue = (PriorityQueue<ConsolidatorWrapper, ConsolidatorScanPriority>)typeof(SubscriptionManager)
+                .GetField("_consolidatorsSortedByScanTime", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .GetValue(manager);
+
+            for (var cycle = 0; cycle < 3; cycle++)
+            {
+                var consolidator = new TradeBarConsolidator(TimeSpan.FromMinutes(1));
+                var sma = new SimpleMovingAverage(2);
+                var std = new StandardDeviation(2);
+                algorithm.RegisterIndicator(symbol, sma, consolidator);
+                algorithm.RegisterIndicator(symbol, std, consolidator);
+
+                consolidator.Update(new TradeBar(algorithm.Time, symbol, 1, 1, 1, 1, 1, TimeSpan.FromMinutes(1)));
+                consolidator.Scan(algorithm.Time.AddMinutes(1));
+                // both indicators still receive the shared consolidator's bars
+                Assert.AreEqual(1, sma.Samples);
+                Assert.AreEqual(1, std.Samples);
+
+                manager.ScanPastConsolidators(algorithm.UtcTime.AddMinutes(1), algorithm);
+                Assert.AreEqual(1, scanQueue.Count);
+
+                manager.RemoveConsolidator(symbol, consolidator);
+                manager.ScanPastConsolidators(algorithm.UtcTime.AddDays(1), algorithm);
+                Assert.AreEqual(0, scanQueue.Count);
+            }
+        }
+
+        [Test]
+        public void RemoveConsolidatorsRemovesAllTheSymbolConsolidators()
+        {
+            var algorithm = new AlgorithmStub();
+            var spy = algorithm.AddEquity("SPY").Symbol;
+            var ibm = algorithm.AddEquity("IBM").Symbol;
+
+            using var spyHourConsolidator = new TradeBarConsolidator(TimeSpan.FromHours(1));
+            using var spyDayConsolidator = new TradeBarConsolidator(TimeSpan.FromDays(1));
+            using var ibmConsolidator = new TradeBarConsolidator(TimeSpan.FromHours(1));
+            algorithm.SubscriptionManager.AddConsolidator(spy, spyHourConsolidator);
+            algorithm.SubscriptionManager.AddConsolidator(spy, spyDayConsolidator);
+            algorithm.SubscriptionManager.AddConsolidator(ibm, ibmConsolidator);
+
+            var removed = algorithm.SubscriptionManager.RemoveConsolidators(spy);
+
+            CollectionAssert.AreEquivalent(new[] { spyHourConsolidator, spyDayConsolidator }, removed);
+            Assert.IsEmpty(GetConsolidators(algorithm, spy));
+            CollectionAssert.AreEqual(new[] { ibmConsolidator }, GetConsolidators(algorithm, ibm));
+            Assert.IsEmpty(algorithm.SubscriptionManager.RemoveConsolidators(spy));
+        }
+
+        private static List<IDataConsolidator> GetConsolidators(QCAlgorithm algorithm, Symbol symbol)
+        {
+            return algorithm.SubscriptionManager.Subscriptions
+                .Where(config => config.Symbol == symbol)
+                .SelectMany(config => config.Consolidators)
+                .ToList();
         }
 
         [Test, Parallelizable(ParallelScope.None)]

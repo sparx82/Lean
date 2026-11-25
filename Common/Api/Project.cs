@@ -228,6 +228,12 @@ namespace QuantConnect.Api
         /// </summary>
         [JsonProperty(PropertyName = "value")]
         public string Value { get; set; }
+
+        /// <summary>
+        /// Name of parameter in the {"key": key, "value": value} format
+        /// </summary>
+        [JsonProperty(PropertyName = "key")]
+        private string Key { set { Name = value ?? Name; } }
     }
 
     /// <summary>
@@ -378,6 +384,12 @@ namespace QuantConnect.Api
         /// </summary>
         [JsonProperty(PropertyName = "encryptionKey")]
         public EncryptionKey EncryptionKey { get; set; }
+
+        /// <summary>
+        /// The maximum file length allowed in the project
+        /// </summary>
+        [JsonProperty(PropertyName = "maxFileSize")]
+        public int MaxFileSize { get; set; }
     }
 
     /// <summary>

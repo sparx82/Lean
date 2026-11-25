@@ -80,6 +80,14 @@ namespace QuantConnect.Tests.Common.Orders
             }
         }
 
+        [Test]
+        public void OrderToStringDescribesTheOrder()
+        {
+            var order = new MarketOrder(Symbols.SPY, 10, new DateTime(2024, 1, 1)) { Id = 7 };
+
+            Assert.AreEqual($"OrderId: 7 (BrokerId: ) None Market order for 10 units of {Symbols.SPY}", order.ToString());
+        }
+
         private static TestCaseData[] GetValueTestParameters()
         {
             const decimal delta = 1m;
@@ -228,6 +236,16 @@ namespace QuantConnect.Tests.Common.Orders
 
 
             }.Select(x => new TestCaseData(x).SetName(x.Name)).ToArray();
+        }
+
+        [Test]
+        public void GroupIdComesFromTheGroupOrderManager()
+        {
+            var order = new MarketOrder(Symbols.SPY, 10, DateTime.UtcNow);
+            Assert.IsNull(order.GroupId);
+
+            var comboOrder = new ComboMarketOrder(Symbols.SPY, 10, DateTime.UtcNow, new GroupOrderManager(33, 2, 10));
+            Assert.AreEqual(33, comboOrder.GroupId);
         }
 
         public class ValueTestParameters

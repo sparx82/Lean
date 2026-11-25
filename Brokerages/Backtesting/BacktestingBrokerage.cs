@@ -46,6 +46,8 @@ namespace QuantConnect.Brokerages.Backtesting
         private readonly ConcurrentDictionary<int, Order> _pending;
         private readonly object _needsScanLock = new object();
         private readonly HashSet<Symbol> _pendingOptionAssignments = new HashSet<Symbol>();
+        private readonly ContingentOrderProcessor _contingentOrderProcessor;
+        private readonly Func<int, Order> _contingentOrderProvider;
 
         /// <summary>
         /// This is the algorithm under test
@@ -71,6 +73,9 @@ namespace QuantConnect.Brokerages.Backtesting
         {
             Algorithm = algorithm;
             _pending = new ConcurrentDictionary<int, Order>();
+            _contingentOrderProcessor = new ContingentOrderProcessor(orderId => Algorithm.Transactions.GetOrderTicket(orderId)?.QuantityFilled ?? 0,
+                algorithm?.Portfolio);
+            _contingentOrderProvider = orderId => TryGetOrder(orderId) ?? Algorithm.Transactions.GetOrderById(orderId);
         }
 
         /// <summary>
@@ -159,8 +164,7 @@ namespace QuantConnect.Brokerages.Backtesting
 
             lock (_needsScanLock)
             {
-                Order pending;
-                if (!_pending.TryGetValue(order.Id, out pending))
+                if (!_pending.TryGetValue(order.Id, out _))
                 {
                     // can't update something that isn't there
                     return false;
@@ -204,27 +208,29 @@ namespace QuantConnect.Brokerages.Backtesting
             var result = true;
             foreach (var orderInGroup in orders)
             {
-                lock (_needsScanLock)
-                {
-                    if (!_pending.TryRemove(orderInGroup.Id, out var _))
-                    {
-                        // can't cancel something that isn't there,
-                        // let's continue just in case some other order of the group has to be cancelled
-                        result = false;
-                    }
-                }
-
-                AddBrokerageOrderId(orderInGroup);
+                // can't cancel something that isn't there, let's continue just in case some other order of the group has to be cancelled
+                result &= RemovePendingOrder(orderInGroup);
 
                 // fire off the event that says this order has been canceled
-                var canceled = new OrderEvent(orderInGroup,
-                        Algorithm.UtcTime,
-                        OrderFee.Zero)
-                { Status = OrderStatus.Canceled };
-                OnOrderEvent(canceled);
+                OnOrderEvent(new OrderEvent(orderInGroup, Algorithm.UtcTime, OrderFee.Zero) { Status = OrderStatus.Canceled });
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Removes the order from the pending ones, before it's canceled
+        /// </summary>
+        /// <returns>False if the order was not pending</returns>
+        private bool RemovePendingOrder(Order order)
+        {
+            bool removed;
+            lock (_needsScanLock)
+            {
+                removed = _pending.TryRemove(order.Id, out var _);
+            }
+            AddBrokerageOrderId(order);
+            return removed;
         }
 
         /// <summary>
@@ -244,14 +250,24 @@ namespace QuantConnect.Brokerages.Backtesting
 
                 var stillNeedsScan = false;
 
-                // process each pending order to produce fills/fire events
-                foreach (var kvp in _pending.OrderBySafe(x => x.Key))
+                // process each pending order to produce fills/fire events, by id. When more than one member of the same OCO/OUO contingency
+                // could fill with the same data we can't know which one would of happen first, so we make the pessimistic assumption:
+                // stop orders, like the stop loss, go first and the rest of the members, like the take profit, are processed last
+                foreach (var kvp in _pending.SafeEnumeration().OrderBy(x => x.Value != null && !x.Value.Type.IsStopOrder() && x.Value.GetSiblingLink() != null
+                    ? x.Key + (long)int.MaxValue
+                    : x.Key))
                 {
                     var order = kvp.Value;
                     if (order == null)
                     {
                         Log.Error("BacktestingBrokerage.Scan(): Null pending order found: " + kvp.Key);
                         _pending.TryRemove(kvp.Key, out order);
+                        continue;
+                    }
+
+                    if (order.Contingency != null && !_pending.ContainsKey(kvp.Key))
+                    {
+                        // removed as a consequence of a previous fill during this scan, like a contingent sibling (OCO)
                         continue;
                     }
 
@@ -272,6 +288,13 @@ namespace QuantConnect.Brokerages.Backtesting
                     if (!order.TryGetGroupOrders(TryGetOrder, out var orders))
                     {
                         // an Order of the group is missing
+                        stillNeedsScan = true;
+                        continue;
+                    }
+
+                    if (!IsWorking(orders))
+                    {
+                        // a contingent child held until its parent fills, or waiting for new data after being triggered
                         stillNeedsScan = true;
                         continue;
                     }
@@ -342,6 +365,12 @@ namespace QuantConnect.Brokerages.Backtesting
                             // invoke fee models for completely filled order events
                             foreach (var fill in fills)
                             {
+                                // an exercise is charged once, on the option's fill: delivering the underlying is part of it
+                                if (order.Type == OrderType.OptionExercise && fill.Symbol != order.Symbol)
+                                {
+                                    continue;
+                                }
+
                                 if (fill.Status == OrderStatus.Filled)
                                 {
                                     // this check is provided for backwards compatibility of older user-defined fill models
@@ -352,7 +381,7 @@ namespace QuantConnect.Brokerages.Backtesting
                                         // It could be the case the order is a combo order, then it contains legs with different quantities and security types.
                                         // Therefore, we need to compute the fees based on the specific leg order and security
                                         var legKVP = securities.Where(x => x.Key.Id == fill.OrderId).Single();
-                                        fill.OrderFee = legKVP.Value.FeeModel.GetOrderFee(new OrderFeeParameters(legKVP.Value, legKVP.Key));
+                                        fill.OrderFee = legKVP.Value.FeeModel.GetOrderFee(new OrderFeeParameters(legKVP.Value, legKVP.Key, fill.FillPrice));
                                     }
                                 }
                             }
@@ -445,7 +474,8 @@ namespace QuantConnect.Brokerages.Backtesting
                     break;
 
                 case OrderType.StopLimit:
-                    OnOrderUpdated(new OrderUpdateEvent { OrderId = order.Id, StopTriggered = ((StopLimitOrder)order).StopTriggered });
+                    var stopLimitOrder = (StopLimitOrder)order;
+                    OnOrderUpdated(new OrderUpdateEvent { OrderId = order.Id, StopTriggered = stopLimitOrder.StopTriggered, StopTriggeredTime = stopLimitOrder.StopTriggeredTime });
                     break;
             }
         }
@@ -489,6 +519,103 @@ namespace QuantConnect.Brokerages.Backtesting
                 _pendingOptionAssignments.Remove(orderEvents[i].Symbol);
             }
             base.OnOrderEvents(orderEvents);
+
+            ProcessContingentOrders(orderEvents);
+        }
+
+        /// <summary>
+        /// Determines whether all the given orders, the legs for a combo order, are working in the market
+        /// </summary>
+        private bool IsWorking(List<Order> orders)
+        {
+            for (var i = 0; i < orders.Count; i++)
+            {
+                if (!IsWorking(orders[i], Algorithm.UtcTime, Algorithm.Portfolio))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Determines whether the order is working in the market at the given time, so it can fill
+        /// </summary>
+        /// <returns>
+        /// False for contingent child orders still held waiting for their parent to fill. Once triggered they can fill
+        /// right away if they are market orders, else they require new data: they shouldn't fill with prices from before being triggered
+        /// </returns>
+        internal static bool IsWorking(Order order, DateTime utcTime, ISecurityProvider securityProvider)
+        {
+            var child = order.GetContingencyLink(ContingencyRole.Child);
+            if (child == null)
+            {
+                return true;
+            }
+            if (!child.Triggered)
+            {
+                return false;
+            }
+            if (order.Type == OrderType.Market || order.Type == OrderType.ComboMarket)
+            {
+                return true;
+            }
+
+            var triggeredTime = child.TriggeredTime ?? order.Time;
+            if (triggeredTime >= utcTime)
+            {
+                // just like any other order, it will be able to fill on the next bar
+                return false;
+            }
+
+            var security = securityProvider?.GetSecurity(order.Symbol);
+            var lastData = security?.GetLastData();
+            return lastData != null && lastData.EndTime.ConvertToUtc(security.Exchange.TimeZone) > triggeredTime;
+        }
+
+        /// <summary>
+        /// Handles the lifecycle of contingent orders (OCO, OTO, OUO, brackets), a real brokerage would do it on its side:
+        /// triggers the held children once their parent fills, cancels or resizes the siblings of an order which filled, etc
+        /// </summary>
+        private void ProcessContingentOrders(List<OrderEvent> orderEvents)
+        {
+            var isContingent = false;
+            for (var i = 0; i < orderEvents.Count && !isContingent; i++)
+            {
+                // the ticket is set by the transaction handler, cheap way to skip the common case
+                isContingent = orderEvents[i].Ticket == null || orderEvents[i].Ticket.Contingency != null;
+            }
+            if (!isContingent)
+            {
+                return;
+            }
+
+            List<OrderUpdateEvent> updates;
+            List<OrderEvent> cancels;
+            lock (_needsScanLock)
+            {
+                (updates, cancels) = _contingentOrderProcessor.Process(orderEvents, _contingentOrderProvider, Algorithm.UtcTime);
+                // the triggered orders can fill now
+                _needsScan |= updates != null;
+            }
+
+            // the transaction handler applies them to the orders, which are the same instances the pending ones
+            for (var i = 0; i < updates?.Count; i++)
+            {
+                OnOrderUpdated(updates[i]);
+            }
+            if (cancels != null)
+            {
+                for (var i = 0; i < cancels.Count; i++)
+                {
+                    if (_contingentOrderProvider(cancels[i].OrderId) is { } order)
+                    {
+                        RemovePendingOrder(order);
+                    }
+                }
+                // together, so the processing of one of them doesn't cancel the others again. Will take care of their own contingent orders, if any
+                OnOrderEvents(cancels);
+            }
         }
 
         /// <summary>
@@ -598,8 +725,6 @@ namespace QuantConnect.Brokerages.Backtesting
         {
             var result = true;
             stillNeedsScan = false;
-
-            var removedOrdersIds = new HashSet<int>();
 
             foreach (var kvp in ordersSecurities)
             {

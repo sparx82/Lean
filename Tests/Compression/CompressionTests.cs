@@ -74,13 +74,19 @@ namespace QuantConnect.Tests.Compression
         }
 
         [Test]
-        public void ZipBytesReturnsByteArrayWithCorrectLength()
+        public void ZipBytesReturnsOnlyArchiveBytes()
         {
             const string file = "../../../Data/equity/usa/tick/spy/20131007_trade.zip";
             var fileBytes = File.ReadAllBytes(file);
             var zippedBytes = QuantConnect.Compression.ZipBytes(fileBytes, "entry");
 
-            Assert.AreEqual(OS.IsWindows ? 905693 : 906121, zippedBytes.Length);
+            // With no ZIP comment, the end-of-central-directory record occupies the last 22 bytes.
+            CollectionAssert.AreEqual(new byte[] { 0x50, 0x4b, 0x05, 0x06 }, zippedBytes[^22..^18]);
+            using var input = new MemoryStream(zippedBytes);
+            using var archive = ZipFile.Read(input);
+            using var output = new MemoryStream();
+            archive["entry"].Extract(output);
+            CollectionAssert.AreEqual(fileBytes, output.ToArray());
         }
 
         [Test]
@@ -130,7 +136,7 @@ namespace QuantConnect.Tests.Compression
             {
                 root.Create();
                 File.WriteAllText(testPath, "string contents");
-                var sub = root.CreateSubdirectory("sub");
+                root.CreateSubdirectory("sub");
                 File.WriteAllText(test2Path, "string contents 2");
                 QuantConnect.Compression.ZipDirectory(root.FullName, zipFile);
                 Directory.Delete(root.FullName, true);
@@ -162,7 +168,7 @@ namespace QuantConnect.Tests.Compression
             {
                 root.Create();
                 File.WriteAllText(testPath, "string contents");
-                var sub = root.CreateSubdirectory("sub");
+                root.CreateSubdirectory("sub");
                 File.WriteAllText(test2Path, "string contents 2");
                 QuantConnect.Compression.ZipDirectory(root.FullName, zipFile);
                 Directory.Delete(root.FullName, true);
@@ -193,7 +199,7 @@ namespace QuantConnect.Tests.Compression
                 Directory.CreateDirectory("./jo\\se");
                 root.Create();
                 File.WriteAllText(testPath, "string contents");
-                var sub = root.CreateSubdirectory("sub");
+                root.CreateSubdirectory("sub");
                 File.WriteAllText(test2Path, "string contents 2");
                 QuantConnect.Compression.ZipDirectory(root.FullName, zipFile);
                 Directory.Delete(root.FullName, true);

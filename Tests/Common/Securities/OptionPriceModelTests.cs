@@ -150,7 +150,7 @@ namespace QuantConnect.Tests.Common
 
             contract.Time = new DateTime(2015, 02, 19);
             var results1 = priceModel.Evaluate(new OptionPriceModelParameters(optionCall, null, contract));
-            // we need to get the greeks else they will calculated bellow after we change the static evaluation date
+            // we need to get the greeks else they will calculated below after we change the static evaluation date
             var gamma = results1.Greeks.Gamma;
             var delta = results1.Greeks.Delta;
             var vega = results1.Greeks.Delta;
@@ -366,7 +366,7 @@ namespace QuantConnect.Tests.Common
             var resultsPut = priceModel.Evaluate(new OptionPriceModelParameters(optionPut, null, contractPut));
 
             Assert.AreEqual(OptionPriceModelResult.None, resultsCall);
-            Assert.AreEqual(OptionPriceModelResult.None, resultsCall);
+            Assert.AreEqual(OptionPriceModelResult.None, resultsPut);
         }
 
         [TestCase("BlackScholes", OptionStyle.American, true)]
@@ -433,7 +433,7 @@ namespace QuantConnect.Tests.Common
             }
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.01d, 0.03d, 0.01d, 0.03d, 77d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.01d, 0.03d, 0.01d, 0.03d, 77d)]
@@ -465,7 +465,7 @@ namespace QuantConnect.Tests.Common
             MatchesIBGreeksTest(symbol, optionSymbol, filename, qlModelName, errorIV, errorDelta, errorGamma, errorVega, errorTheta);
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.03d, 0.05d, 0.01d, 0.02d, 48d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.03d, 0.05d, 0.01d, 0.02d, 49d)]
@@ -497,7 +497,7 @@ namespace QuantConnect.Tests.Common
             MatchesIBGreeksTest(symbol, optionSymbol, filename, qlModelName, errorIV, errorDelta, errorGamma, errorVega, errorTheta);
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.02d, 0.02d, 0.01d, 0.03d, 64d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.02d, 0.08d, 0.05d, 0.03d, 447d)]
@@ -529,7 +529,7 @@ namespace QuantConnect.Tests.Common
             MatchesIBGreeksTest(symbol, optionSymbol, filename, qlModelName, errorIV, errorDelta, errorGamma, errorVega, errorTheta);
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.02d, 0.03d, 0.01d, 0.02d, 35d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.02d, 0.05d, 0.02d, 0.02d, 129d)]
@@ -561,7 +561,7 @@ namespace QuantConnect.Tests.Common
             MatchesIBGreeksTest(symbol, optionSymbol, filename, qlModelName, errorIV, errorDelta, errorGamma, errorVega, errorTheta);
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.05d, 0.05d, 0.01d, 0.22d, 56d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.05d, 0.05d, 0.01d, 0.06d, 57d)]
@@ -593,7 +593,7 @@ namespace QuantConnect.Tests.Common
             MatchesIBGreeksTest(symbol, optionSymbol, filename, qlModelName, errorIV, errorDelta, errorGamma, errorVega, errorTheta);
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.04d, 0.07d, 0.01d, 0.23d, 50d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.04d, 0.07d, 0.01d, 0.09d, 50d)]
@@ -625,7 +625,7 @@ namespace QuantConnect.Tests.Common
             MatchesIBGreeksTest(symbol, optionSymbol, filename, qlModelName, errorIV, errorDelta, errorGamma, errorVega, errorTheta);
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.13d, 1.00d, 0.01d, 0.24d, 5.92d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.13d, 0.39d, 0.01d, 0.24d, 526d)]
@@ -657,7 +657,7 @@ namespace QuantConnect.Tests.Common
             MatchesIBGreeksTest(symbol, optionSymbol, filename, qlModelName, errorIV, errorDelta, errorGamma, errorVega, errorTheta);
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.11d, 1.00d, 0.02d, 0.37d, 4.66d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.11d, 0.31d, 0.02d, 0.37d, 90d)]
@@ -689,7 +689,7 @@ namespace QuantConnect.Tests.Common
             MatchesIBGreeksTest(symbol, optionSymbol, filename, qlModelName, errorIV, errorDelta, errorGamma, errorVega, errorTheta);
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.01d, 0.01d, 0.01d, 0.24d, 5.84d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.01d, 0.01d, 0.01d, 0.01d, 6.02d)]
@@ -721,7 +721,7 @@ namespace QuantConnect.Tests.Common
             MatchesIBGreeksTest(symbol, optionSymbol, filename, qlModelName, errorIV, errorDelta, errorGamma, errorVega, errorTheta);
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.01d, 0.01d, 0.01d, 0.24d, 17d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.01d, 0.01d, 0.01d, 0.24d, 17d)]
@@ -753,7 +753,7 @@ namespace QuantConnect.Tests.Common
             MatchesIBGreeksTest(symbol, optionSymbol, filename, qlModelName, errorIV, errorDelta, errorGamma, errorVega, errorTheta);
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.02d, 0.01d, 0.01d, 0.21d, 19d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.02d, 0.33d, 0.01d, 0.21d, 678d)]
@@ -785,7 +785,7 @@ namespace QuantConnect.Tests.Common
             MatchesIBGreeksTest(symbol, optionSymbol, filename, qlModelName, errorIV, errorDelta, errorGamma, errorVega, errorTheta);
         }
 
-        /// This test aim to comapre the maximum greek calculation error between models (2dp)
+        /// This test aim to compare the maximum greek calculation error between models (2dp)
         /// as well as a benchmark of each model to monitor future changes
         [TestCase(OptionStyle.American, "AdditiveEquiprobabilities", 0.01d, 0.01d, 0.01d, 0.21d, 29d)]
         [TestCase(OptionStyle.American, "BaroneAdesiWhaley", 0.01d, 0.23d, 0.01d, 0.21d, 169d)]
@@ -874,12 +874,11 @@ namespace QuantConnect.Tests.Common
             var contract = GetOptionContract(optionSymbol, spy, evaluationDate);
             var payoff = new PlainVanillaPayoff(contract.Right == OptionRight.Call ? QLNet.Option.Type.Call : QLNet.Option.Type.Put, (double)contract.Strike);
             var forwardPrice = underlyingPrice / 0.99d;
-            BlackCalculator black = null;
 
             // running evaluation with 0% dividend yield and 1% interest rate
             var initialGuess = Math.Sqrt(2 * Math.PI) * price / underlyingPrice;
             var priceModel = new TestOptionPriceModel();
-            var impliedVolEstimate = priceModel.TestImpliedVolEstimator(price, initialGuess, 1, 0.99d, forwardPrice, payoff, out black);
+            var impliedVolEstimate = priceModel.TestImpliedVolEstimator(price, initialGuess, 1, 0.99d, forwardPrice, payoff, out _);
 
             // Expect minor error due to interest rate and dividend yield used in IB
             Assert.AreEqual(impliedVolEstimate, ibImpliedVol, 0.001);

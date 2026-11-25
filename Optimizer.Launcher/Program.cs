@@ -30,15 +30,22 @@ namespace QuantConnect.Optimizer.Launcher
 {
     public class Program
     {
-        public static void Main(string[] args)
+        public static int Main(string[] args)
         {
             // Parse report arguments and merge with config to use in the optimizer
             if (args.Length > 0)
             {
-                Config.MergeCommandLineArgumentsWithConfiguration(OptimizerArgumentParser.ParseArguments(args));
+                var cliArguments = OptimizerArgumentParser.ParseArguments(args);
+                // Unknown arguments throw, so arguments that parse to no options only requested help or version, already shown
+                if (cliArguments.Count == 0)
+                {
+                    return 0;
+                }
+                Config.MergeCommandLineArgumentsWithConfiguration(cliArguments);
             }
 
             using var endedEvent = new ManualResetEvent(false);
+            LeanOptimizer optimizer = null;
 
             try
             {
@@ -72,7 +79,7 @@ namespace QuantConnect.Optimizer.Launcher
                 packet.OutOfSampleDays = Config.GetInt("out-of-sample-days");
 
                 var optimizerType = Config.Get("optimization-launcher", typeof(ConsoleLeanOptimizer).Name);
-                var optimizer = (LeanOptimizer)Activator.CreateInstance(Composer.Instance.GetExportedTypes<LeanOptimizer>().Single(x => x.Name == optimizerType), packet);
+                optimizer = (LeanOptimizer)Activator.CreateInstance(Composer.Instance.GetExportedTypes<LeanOptimizer>().Single(x => x.Name == optimizerType), packet);
 
                 if (Config.GetBool("estimate", false))
                 {
@@ -96,10 +103,13 @@ namespace QuantConnect.Optimizer.Launcher
             catch (Exception e)
             {
                 Log.Error(e);
+                optimizer.DisposeSafely();
+                return 1;
             }
 
             // Wait until the optimizer has stopped running before exiting
             endedEvent.WaitOne();
+            return 0;
         }
     }
 }

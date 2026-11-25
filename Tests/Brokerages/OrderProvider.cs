@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -32,6 +33,7 @@ namespace QuantConnect.Tests.Brokerages
         private int _groupOrderManagerId;
         private protected readonly IList<Order> _orders;
         private readonly object _lock = new object();
+        private readonly ConcurrentDictionary<int, OrderTicket> _orderTickets = new ConcurrentDictionary<int, OrderTicket>();
 
         public OrderProvider(IList<Order> orders)
         {
@@ -56,6 +58,50 @@ namespace QuantConnect.Tests.Brokerages
             {
                 _orders.Add(order);
             }
+
+            _orderTickets[order.Id] = CreateOrderTicket(order);
+        }
+
+        /// <summary>
+        /// Applies an order event to the ticket of its order, the way the transaction handler does, so the
+        /// ticket keeps the filled quantity and the average fill price of the order.
+        /// </summary>
+        /// <param name="orderEvent">The order event to apply</param>
+        public void HandleOrderEvent(OrderEvent orderEvent)
+        {
+            var order = GetOrderById(orderEvent.OrderId);
+            if (order == null)
+            {
+                Log.Error($"OrderProvider.HandleOrderEvent(): Lean order id {orderEvent.OrderId} not found");
+                return;
+            }
+
+            order.Status = orderEvent.Status;
+
+            if (_orderTickets.TryGetValue(orderEvent.OrderId, out var orderTicket))
+            {
+                orderEvent.Ticket = orderTicket;
+                orderTicket.AddOrderEvent(orderEvent);
+            }
+        }
+
+        /// <summary>
+        /// Takes an update request the way the transaction handler does when the algorithm sends it: on the ticket of
+        /// its order and processing. The handler applies the values of a request to the order when it processes it,
+        /// one request at a time, right before it calls the brokerage; a test does the same with
+        /// <see cref="Order.ApplyUpdateOrderRequest"/> for the request the brokerage is to see
+        /// </summary>
+        /// <param name="request">The update request</param>
+        public void UpdateOrder(UpdateOrderRequest request)
+        {
+            if (!_orderTickets.TryGetValue(request.OrderId, out var orderTicket))
+            {
+                Log.Error($"OrderProvider.UpdateOrder(): Lean order id {request.OrderId} not found");
+                return;
+            }
+
+            orderTicket.AddUpdateRequest(request);
+            request.SetResponse(OrderResponse.Success(request), OrderRequestStatus.Processing);
         }
 
         public int OrdersCount => _orders.Count;
@@ -81,17 +127,18 @@ namespace QuantConnect.Tests.Brokerages
 
         public IEnumerable<OrderTicket> GetOrderTickets(Func<OrderTicket, bool> filter = null)
         {
-            throw new NotImplementedException("This method has not been implemented");
+            return _orderTickets.Select(x => x.Value).Where(x => filter == null || filter(x));
         }
 
         public IEnumerable<OrderTicket> GetOpenOrderTickets(Func<OrderTicket, bool> filter = null)
         {
-            throw new NotImplementedException();
+            return GetOrderTickets(x => x.Status.IsOpen() && (filter == null || filter(x)));
         }
 
         public OrderTicket GetOrderTicket(int orderId)
         {
-            throw new NotImplementedException("This method has not been implemented");
+            _orderTickets.TryGetValue(orderId, out var orderTicket);
+            return orderTicket;
         }
 
         public IEnumerable<Order> GetOrders(Func<Order, bool> filter)
@@ -127,6 +174,24 @@ namespace QuantConnect.Tests.Brokerages
         public ProjectedHoldings GetProjectedHoldings(Security security)
         {
             throw new NotImplementedException();
+        }
+
+        /// <summary>
+        /// Creates the ticket of an order, the way the transaction handler creates it from the request that
+        /// placed the order
+        /// </summary>
+        /// <param name="order">The order to create the ticket for</param>
+        /// <returns>The ticket of the given order</returns>
+        private static OrderTicket CreateOrderTicket(Order order)
+        {
+            var submitRequest = new SubmitOrderRequest(order.Type, order.SecurityType, order.Symbol, order.Quantity, 0m, 0m,
+                order.Time, order.Tag, order.Properties, order.GroupOrderManager);
+            submitRequest.SetOrderId(order.Id);
+
+            var orderTicket = new OrderTicket(null, submitRequest);
+            orderTicket.SetOrder(order);
+
+            return orderTicket;
         }
     }
 }

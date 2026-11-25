@@ -69,7 +69,7 @@ namespace QuantConnect.Algorithm.CSharp
         private const decimal MaximumLeverage = 4;
         private const decimal GlobalStopLossPercent = 0.001m;
         private const decimal PercentProfitStartPsarTrailingStop = 0.0003m;
-        private const decimal MaximumPorfolioRiskPercentPerPosition = .0025m;
+        private const decimal MaximumPortfolioRiskPercentPerPosition = .0025m;
 
         // entrance criteria
         private const int OpeningSpanInMinutes = 3;
@@ -136,7 +136,7 @@ namespace QuantConnect.Algorithm.CSharp
             ATR14 = ATR(symbol, 14, resolution: Resolution.Daily);
             PSARMin = new ParabolicStopAndReverse(symbol, afStart: 0.0001m, afIncrement: 0.0001m);
 
-            // smooth our ATR over a week, we'll use this to determine if recent volatilty warrants entrance
+            // smooth our ATR over a week, we'll use this to determine if recent volatility warrants entrance
             var oneWeekInMarketHours = (int)(5*6.5);
             _smoothedATR14 = new ExponentialMovingAverage("Smoothed_" + ATR14.Name, oneWeekInMarketHours).Of(ATR14);
             // smooth our STD over a week as well
@@ -290,12 +290,12 @@ namespace QuantConnect.Algorithm.CSharp
             // expect capture 10% of the daily range
             var expectedCaptureRange = 0.1m*ATR14;
 
-            var allowedDollarLoss = MaximumPorfolioRiskPercentPerPosition * Portfolio.TotalPortfolioValue;
+            var allowedDollarLoss = MaximumPortfolioRiskPercentPerPosition * Portfolio.TotalPortfolioValue;
 
             var shares = (int) (allowedDollarLoss/expectedCaptureRange);
 
-            // determine a position size based on an acceptable loss in proporton to our total portfolio value
-            //var shares = (int) (MaximumLeverage*MaximumPorfolioRiskPercentPerPosition*Portfolio.TotalPortfolioValue/(0.4m*ATR14));
+            // determine a position size based on an acceptable loss in proportion to our total portfolio value
+            //var shares = (int) (MaximumLeverage*MaximumPortfolioRiskPercentPerPosition*Portfolio.TotalPortfolioValue/(0.4m*ATR14));
 
             // max out at a little below our stated max, prevents margin calls and such
             var maxShare = (int) CalculateOrderQuantity(symbol, MaximumLeverage);

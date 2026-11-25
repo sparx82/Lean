@@ -40,7 +40,6 @@ namespace QuantConnect.Securities
             //Get the required information from the vehicle this order will affect
             var isLong = security.Holdings.IsLong;
             var isShort = security.Holdings.IsShort;
-            var closedPosition = false;
             //Make local decimals to avoid any rounding errors from int multiplication
             var quantityHoldings = (decimal)security.Holdings.Quantity;
             var averageHoldingsPrice = security.Holdings.AveragePrice;
@@ -66,7 +65,7 @@ namespace QuantConnect.Securities
                 }
 
                 // apply the funds using the current settlement model
-                // we dont adjust funds for futures and CFDs: it is zero upfront payment derivative (margin applies though)
+                // we don't adjust funds for futures and CFDs: it is zero upfront payment derivative (margin applies though)
                 // We do however apply funds for futures options, pay/gained premium, since they affect our cash balance the moment they are purchased/sold.
                 if (security.Type != SecurityType.Future && security.Type != SecurityType.Cfd && security.Type != SecurityType.CryptoFuture)
                 {
@@ -79,9 +78,10 @@ namespace QuantConnect.Securities
                     security.SettlementModel.ApplyFunds(new ApplyFundsSettlementModelParameters(portfolio, security, fill.UtcTime, new CashAmount(fill.FillQuantity, forex.BaseCurrency.Symbol), fill));
                 }
 
-                // did we close or open a position further?
-                closedPosition = isLong && fill.Direction == OrderDirection.Sell
-                             || isShort && fill.Direction == OrderDirection.Buy;
+                // did we close or open a position further? an event with no fill quantity, such as the brokerage
+                // closing an order short of its quantity after its last fill, trades nothing
+                var closedPosition = fill.FillQuantity != 0
+                    && (isLong && fill.Direction == OrderDirection.Sell || isShort && fill.Direction == OrderDirection.Buy);
 
                 // calculate the last trade profit
                 if (closedPosition)
@@ -114,7 +114,7 @@ namespace QuantConnect.Securities
                     {
                         case OrderDirection.Buy:
                             //Update the Holding Average Price: Total Value / Total Quantity:
-                            averageHoldingsPrice = ((averageHoldingsPrice*quantityHoldings) + (fill.FillQuantity*fill.FillPrice))/(quantityHoldings + fill.FillQuantity);
+                            averageHoldingsPrice = security.Holdings.GetAveragePriceAfterIncrease(averageHoldingsPrice, quantityHoldings, fill.FillPrice, fill.FillQuantity);
                             //Add the new quantity:
                             quantityHoldings += fill.FillQuantity;
                             break;
@@ -156,7 +156,7 @@ namespace QuantConnect.Securities
                             //We are increasing a Short position:
                             //E.g.  -100 @ $5, adding -100 @ $10: Avg: $7.5
                             //      dAvg = (-500 + -1000) / -200 = 7.5
-                            averageHoldingsPrice = ((averageHoldingsPrice*quantityHoldings) + (fill.FillQuantity*fill.FillPrice))/(quantityHoldings + fill.FillQuantity);
+                            averageHoldingsPrice = security.Holdings.GetAveragePriceAfterIncrease(averageHoldingsPrice, quantityHoldings, fill.FillPrice, fill.FillQuantity);
                             quantityHoldings += fill.FillQuantity;
                             break;
                     }
@@ -178,15 +178,15 @@ namespace QuantConnect.Securities
         {
             var absoluteHoldingsQuantity = security.Holdings.AbsoluteQuantity;
 
-            // profit = (closed sale value - cost)*conversion to account currency
-            // closed sale value = quantity closed * fill price       BUYs are deemed negative cash flow
-            // cost = quantity closed * average holdings price        SELLS are deemed positive cash flow
+            // Match the closed quantity's sign to the existing position.
             var absoluteQuantityClosed = Math.Min(fill.AbsoluteFillQuantity, absoluteHoldingsQuantity);
             var quantityClosed = Math.Sign(-fill.FillQuantity) * absoluteQuantityClosed;
             var closedCost = security.Holdings.GetQuantityValue(quantityClosed, security.Holdings.AveragePrice);
             var closedSaleValueInQuoteCurrency = security.Holdings.GetQuantityValue(quantityClosed, fill.FillPrice);
 
-            var lastTradeProfit = new ConvertibleCashAmount(closedSaleValueInQuoteCurrency.Amount - closedCost.Amount, closedSaleValueInQuoteCurrency.Cash);
+            var lastTradeProfit = new ConvertibleCashAmount(
+                security.Holdings.GetProfitFromValueChange(closedCost.Amount, closedSaleValueInQuoteCurrency.Amount),
+                closedSaleValueInQuoteCurrency.Cash);
 
             // Reflect account cash adjustment for futures/CFD position
             if (security.Type == SecurityType.Future || security.Type == SecurityType.Cfd || security.Type == SecurityType.CryptoFuture)

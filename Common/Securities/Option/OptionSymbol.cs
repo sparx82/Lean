@@ -27,6 +27,7 @@ namespace QuantConnect.Securities.Option
     public static class OptionSymbol
     {
         private static readonly Dictionary<string, byte> _optionExpirationErrorLog = new();
+        private static readonly TimeSpan _pmSettledIndexOptionsEasternExpiryTime = TimeSpan.FromHours(16);
 
         /// <summary>
         /// Returns true if the option is a standard contract that expires 3rd Friday of the month
@@ -95,6 +96,20 @@ namespace QuantConnect.Securities.Option
         /// <returns></returns>
         public static DateTime GetLastDayOfTrading(Symbol symbol)
         {
+            var exchangeHours = MarketHoursDatabase.FromDataFolder()
+                .GetEntry(symbol.ID.Market, symbol, symbol.SecurityType)
+                .ExchangeHours;
+            return GetLastDayOfTrading(symbol, exchangeHours);
+        }
+
+        /// <summary>
+        /// Returns the last trading date for the option contract, using the given exchange hours instead of looking them up
+        /// </summary>
+        /// <param name="symbol">Option symbol</param>
+        /// <param name="exchangeHours">The exchange hours of the option</param>
+        /// <returns></returns>
+        public static DateTime GetLastDayOfTrading(Symbol symbol, SecurityExchangeHours exchangeHours)
+        {
             // The OCC proposed rule change: starting from 1 Feb 2015 standard monthly contracts
             // expire on 3rd Friday, not Saturday following 3rd Friday as it was before.
             // More details: https://www.sec.gov/rules/sro/occ/2013/34-69480.pdf
@@ -108,10 +123,6 @@ namespace QuantConnect.Securities.Option
             {
                 daysBefore--;
             }
-
-            var exchangeHours = MarketHoursDatabase.FromDataFolder()
-                                              .GetEntry(symbol.ID.Market, symbol, symbol.SecurityType)
-                                              .ExchangeHours;
 
             while (!exchangeHours.IsDateOpen(symbolDateTime.AddDays(daysBefore)))
             {
@@ -133,21 +144,32 @@ namespace QuantConnect.Securities.Option
                 throw new ArgumentException($"The symbol {symbol} is not an option type");
             }
 
-            // Standard index options are AM-settled, which means they settle on market open of the expiration date.
+            // AM-settled index options settle on the market open of their expiration date, or of the previous trading day
+            // when it isn't one, as for legacy Saturday expirations. For the known AM-settled tickers that date isn't always
+            // a 3rd Friday, as for VIX and VIXW (Wednesday). Other tickers not known to be PM-settled are taken as AM-settled
+            // on 3rd Fridays only.
             // Non-standard tickers (e.g. SPXW, RUTW) are always PM-settled, even when expiring on the 3rd Friday.
-            if (expiryTime.Date == symbol.ID.Date.Date
-                && symbol.SecurityType == SecurityType.IndexOption
-                && IsStandard(symbol)
-                && IndexOptionSymbol.IsAMSettled(symbol))
+            if (symbol.SecurityType == SecurityType.IndexOption
+                && (expiryTime.Date <= symbol.ID.Date.Date
+                        && IndexOptionSymbol.KnownAMSettledIndexOptionTickers.Contains(symbol.ID.Symbol.LazyToUpper())
+                    || expiryTime.Date == symbol.ID.Date.Date
+                        && IsStandard(symbol)
+                        && IndexOptionSymbol.IsAMSettled(symbol)))
             {
                 expiryTime = exchangeHours.GetNextMarketOpen(expiryTime.Date, false);
             }
-            // 0DTE PM-settled index options expire at 4:00 PM ET, not the regular 4:15 PM ET (CBOE spec)
+            // 0DTE PM-settled index options expire at 4:00 PM ET, not the regular 4:15 PM ET (CBOE spec),
+            // unless the session closes earlier, as on an early close
             else if (expiryTime.Date == symbol.ID.Date.Date
                 && symbol.SecurityType == SecurityType.IndexOption
                 && !IndexOptionSymbol.IsAMSettled(symbol))
             {
-                expiryTime = expiryTime.Date.Add(TimeSpan.FromHours(15));
+                var pmSettlementTime = expiryTime.Date.Add(_pmSettledIndexOptionsEasternExpiryTime)
+                    .ConvertTo(TimeZones.NewYork, exchangeHours.TimeZone);
+                if (expiryTime > pmSettlementTime)
+                {
+                    expiryTime = pmSettlementTime;
+                }
             }
 
             return expiryTime;

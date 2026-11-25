@@ -18,7 +18,7 @@ using System;
 namespace QuantConnect.Brokerages
 {
     /// <summary>
-    /// Specifices what transaction model and submit/execution rules to use
+    /// Specifies what transaction model and submit/execution rules to use
     /// </summary>
     public enum BrokerageName
     {
@@ -32,6 +32,12 @@ namespace QuantConnect.Brokerages
         /// Alternate naming for default brokerage
         /// </summary>
         QuantConnectBrokerage = Default,
+
+        /// <summary>
+        /// Transaction and submit/execution rules will be the default as initialized
+        /// Alternate naming for default brokerage, QUANTCONNECT_BROKERAGE in Python
+        /// </summary>
+        QuantconnectBrokerage = Default,
 
         /// <summary>
         /// Transaction and submit/execution rules will use interactive brokers models
@@ -177,6 +183,7 @@ namespace QuantConnect.Brokerages
         /// <summary>
         /// Transaction and submit/execution rules will use Terminal link models
         /// </summary>
+        [Obsolete("TerminalLink brokerage name is deprecated. Use QuantBridge instead.")]
         TerminalLink,
 
         /// <summary>
@@ -214,6 +221,19 @@ namespace QuantConnect.Brokerages
         /// </summary>
         BloombergFix,
 
-        Saxo
+        /// <summary>
+        /// Transaction and submit/execution rules will use Clear Street models
+        /// </summary>
+        ClearStreet,
+
+        /// <summary>
+        /// Transaction and submit/execution rules will use Quant Bridge models
+        /// </summary>
+        QuantBridge,
+        
+        /// <summary>
+        /// Transaction and submit/execution rules will use eToro models
+        /// </summary>
+        Etoro
     }
 }

@@ -13,6 +13,8 @@
  * limitations under the License.
 */
 
+using System;
+
 namespace QuantConnect.Orders
 {
     /// <summary>
@@ -35,5 +37,22 @@ namespace QuantConnect.Orders
         /// Flag indicating whether stop has been triggered for a <see cref="StopLimitOrder"/>
         /// </summary>
         public bool StopTriggered { get; set; }
+
+        /// <summary>
+        /// Time in UTC at which the stop was triggered for a <see cref="StopLimitOrder"/>, if any
+        /// </summary>
+        public DateTime? StopTriggeredTime { get; set; }
+
+        /// <summary>
+        /// Flag indicating whether a contingent child order has been triggered, that is, its parent filled and
+        /// the order was released to the market. See <see cref="ContingencyLink.Triggered"/>
+        /// </summary>
+        public bool ContingencyTriggered { get; set; }
+
+        /// <summary>
+        /// The updated order quantity, if any. Used when the brokerage resizes an order on its side,
+        /// like for the members of a <see cref="ContingencyType.OneUpdatesOther"/> contingency or the legs of a bracket order
+        /// </summary>
+        public decimal? Quantity { get; set; }
     }
 }

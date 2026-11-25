@@ -105,6 +105,13 @@ namespace QuantConnect.Algorithm.Framework.Execution
         {
             foreach (var added in changes.AddedSecurities)
             {
+                if (_symbolData.TryGetValue(added.Symbol, out var data)
+                    && !IsConsolidatorReceivingData(algorithm, added.Symbol, data.Consolidator))
+                {
+                    _symbolData.Remove(added.Symbol);
+                    algorithm.SubscriptionManager.RemoveConsolidator(added.Symbol, data.Consolidator);
+                }
+
                 if (!_symbolData.ContainsKey(added.Symbol))
                 {
                     _symbolData[added.Symbol] = new SymbolData(algorithm, added);
@@ -196,8 +203,10 @@ namespace QuantConnect.Algorithm.Framework.Execution
             public SymbolData(QCAlgorithm algorithm, Security security)
             {
                 Security = security;
-                Consolidator = algorithm.ResolveConsolidator(security.Symbol, security.Resolution);
-                var name = algorithm.CreateIndicatorName(security.Symbol, "VWAP", security.Resolution);
+                // use the resolution of the subscription the consolidator is attached to: the security keeps the subscriptions
+                // of a universe that no longer selects it, so its resolution can be finer than the data it still receives
+                Consolidator = algorithm.ResolveConsolidator(security.Symbol, (Resolution?)null);
+                var name = algorithm.CreateIndicatorName(security.Symbol, "VWAP", null);
                 VWAP = new IntradayVwap(name);
 
                 algorithm.RegisterIndicator(security.Symbol, VWAP, Consolidator, bd => (BaseData)bd);

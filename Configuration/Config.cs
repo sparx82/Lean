@@ -135,7 +135,7 @@ namespace QuantConnect.Configuration
         /// <summary>
         /// Get the matching config setting from the file searching for this key.
         /// </summary>
-        /// <param name="key">String key value we're seaching for in the config file.</param>
+        /// <param name="key">String key value we're searching for in the config file.</param>
         /// <param name="defaultValue"></param>
         /// <returns>String value of the configuration setting or empty string if nothing found.</returns>
         public static string Get(string key, string defaultValue = "")
@@ -342,12 +342,12 @@ namespace QuantConnect.Configuration
             if (!Settings.IsValueCreated) return;
             var serialized = JsonConvert.SerializeObject(Settings.Value, Formatting.Indented);
 
-            var taget = ConfigurationFileName;
+            var target = ConfigurationFileName;
             if (!string.IsNullOrEmpty(targetPath))
             {
-                taget = Path.Combine(targetPath, ConfigurationFileName);
+                target = Path.Combine(targetPath, ConfigurationFileName);
             }
-            File.WriteAllText(taget, serialized);
+            File.WriteAllText(target, serialized);
         }
 
         /// <summary>
@@ -435,7 +435,7 @@ namespace QuantConnect.Configuration
                         {
                             current = setting;
                         }
-                        // allows nesting of environments, live.tradier, live.interactive, ect...
+                        // allows nesting of environments, live.tradier, live.interactive, etc...
                         return GetToken(environment, key, current);
                     }
                 }

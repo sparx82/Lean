@@ -61,7 +61,7 @@ namespace QuantConnect
         {
             var jobject = JObject.Load(reader);
 
-            if (jobject.TryGetValue("type", StringComparison.InvariantCultureIgnoreCase, out var type))
+            if (jobject.TryGetValue("type", StringComparison.InvariantCultureIgnoreCase, out _))
             {
                 return BuildSymbolFromUserFriendlyValue(jobject);
             }
@@ -98,7 +98,13 @@ namespace QuantConnect
                     underlyingSymbol = ReadSymbolFromJson(underlying as JObject);
                 }
 
-                return new Symbol(SecurityIdentifier.Parse(symbolId.ToString()), value.ToString(), underlyingSymbol);
+                var sid = SecurityIdentifier.Parse(symbolId.ToString());
+                if (underlyingSymbol == null && sid.HasUnderlying)
+                {
+                    // the underlying might be missing, e.g. live holdings, derive it from the sid
+                    underlyingSymbol = new Symbol(sid.Underlying, sid.Underlying.Symbol);
+                }
+                return new Symbol(sid, value.ToString(), underlyingSymbol);
             }
             return null;
         }

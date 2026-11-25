@@ -247,12 +247,10 @@ namespace QuantConnect.ToolBox.AlgoSeekFuturesConverter
         }
 
         /// <summary>
-        /// Compress the queue buffers directly to a zip file. Lightening fast as streaming ram-> compressed zip.
+        /// Compress the queue buffers directly to a zip file. Lightning fast as streaming ram-> compressed zip.
         /// </summary>
         public void Package(DateTime date)
         {
-            var zipper = OS.IsWindows ? "C:/Program Files/7-Zip/7z.exe" : "7z";
-
             Log.Trace("AlgoSeekFuturesConverter.Package(): Zipping all files ...");
 
             var destination = Path.Combine(_destination, "future");

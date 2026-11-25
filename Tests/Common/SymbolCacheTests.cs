@@ -50,8 +50,7 @@ namespace QuantConnect.Tests.Common
         [Test]
         public void HandlesRoundTripAccessTickerToSymbol()
         {
-            var expected = "ticker";
-            expected = Symbols.EURUSD.Value;
+            var expected = Symbols.EURUSD.Value;
             SymbolCache.Set(expected, Symbols.EURUSD);
             var actual = SymbolCache.GetTicker(Symbols.EURUSD);
             Assert.AreEqual(expected, actual);
@@ -205,25 +204,33 @@ namespace QuantConnect.Tests.Common
         }
 
         [Test]
+        public void TryGetSymbol_FromTicker_WithoutCustomDataSuffix_DoesNotReturnEquity()
+        {
+            var ticker = "LIFE";
+            var permanentTicker = $"{ticker}.1";
+            var permanentSymbol = Symbol.Create(permanentTicker, SecurityType.Equity, Market.USA);
+            SymbolCache.Set(permanentTicker, permanentSymbol);
+
+            Assert.IsFalse(SymbolCache.TryGetSymbol(ticker, out var fetchedSymbol));
+            Assert.IsNull(fetchedSymbol);
+        }
+
+        [Test]
         public void TryRemoveSymbolRemovesSymbolMappings()
         {
-            string ticker;
-            Symbol symbol;
             SymbolCache.Set("SPY", Symbols.SPY);
             Assert.IsTrue(SymbolCache.TryRemove(Symbols.SPY));
-            Assert.IsFalse(SymbolCache.TryGetSymbol("SPY", out symbol));
-            Assert.IsFalse(SymbolCache.TryGetTicker(Symbols.SPY, out ticker));
+            Assert.IsFalse(SymbolCache.TryGetSymbol("SPY", out _));
+            Assert.IsFalse(SymbolCache.TryGetTicker(Symbols.SPY, out _));
         }
 
         [Test]
         public void TryRemoveTickerRemovesSymbolMappings()
         {
-            string ticker;
-            Symbol symbol;
             SymbolCache.Set("SPY", Symbols.SPY);
             Assert.IsTrue(SymbolCache.TryRemove("SPY"));
-            Assert.IsFalse(SymbolCache.TryGetSymbol("SPY", out symbol));
-            Assert.IsFalse(SymbolCache.TryGetTicker(Symbols.SPY, out ticker));
+            Assert.IsFalse(SymbolCache.TryGetSymbol("SPY", out _));
+            Assert.IsFalse(SymbolCache.TryGetTicker(Symbols.SPY, out _));
         }
     }
 }

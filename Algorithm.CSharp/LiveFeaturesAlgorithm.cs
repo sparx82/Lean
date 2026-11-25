@@ -102,7 +102,7 @@ namespace QuantConnect.Algorithm.CSharp
         /// </summary>
         public override void OnBrokerageMessage(BrokerageMessageEvent messageEvent)
         {
-            Debug($"Brokerage meesage received - {messageEvent.ToString()}");
+            Debug($"Brokerage message received - {messageEvent.ToString()}");
         }
 
         /// <summary>
@@ -153,7 +153,7 @@ namespace QuantConnect.Algorithm.CSharp
             /// and as such we want to know the entire time span covered
             /// </summary>
             /// <remarks>
-            /// This property is overriden to allow different values for Time and EndTime
+            /// This property is overridden to allow different values for Time and EndTime
             /// if they are set in the Reader. In the base implementation EndTime equals Time
             /// </remarks>
             public override DateTime EndTime { get; set; }

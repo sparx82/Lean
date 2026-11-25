@@ -25,7 +25,7 @@ using QuantConnect.Util;
 namespace QuantConnect.Lean.Engine.DataFeeds.Transport
 {
     /// <summary>
-    /// Represents a stream reader capabable of downloading a remote file and then
+    /// Represents a stream reader capable of downloading a remote file and then
     /// reading it from disk
     /// </summary>
     public class RemoteFileSubscriptionStreamReader : IStreamReader
@@ -34,6 +34,11 @@ namespace QuantConnect.Lean.Engine.DataFeeds.Transport
         private static IDownloadProvider _downloader;
         // lock for multi thread scenarios where we are sharing the same cached file
         private static readonly object _fileSystemLock = new object();
+
+        /// <summary>
+        /// The unit of the wait between download attempts, settable so the unit tests don't wait on the retries
+        /// </summary>
+        internal static TimeSpan RetryDelayUnit { get; set; } = TimeSpan.FromSeconds(1);
 
         /// <summary>
         /// Gets whether or not this stream reader should be rate limited
@@ -64,9 +69,9 @@ namespace QuantConnect.Lean.Engine.DataFeeds.Transport
             var useCache = !dataCacheProvider.IsDataEphemeral;
 
             // create a hash for a new filename
-            string baseFileName = string.Empty;
-            string extension = string.Empty;
-            string entryName = string.Empty;
+            string baseFileName;
+            string extension;
+            string entryName;
             try
             {
                 var uri = new Uri(source);
@@ -199,7 +204,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds.Transport
 
                 if (attempt < maxAttempts)
                 {
-                    Thread.Sleep(2000 + 1000 * attempt);
+                    Thread.Sleep(RetryDelayUnit * (2 + attempt));
                 }
             }
 

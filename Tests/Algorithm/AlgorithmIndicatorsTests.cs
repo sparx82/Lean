@@ -21,6 +21,8 @@ using NUnit.Framework;
 using Python.Runtime;
 using QuantConnect.Algorithm;
 using QuantConnect.Data;
+using QuantConnect.Data.Consolidators;
+using QuantConnect.Data.Custom.IconicTypes;
 using QuantConnect.Data.Market;
 using QuantConnect.Indicators;
 using QuantConnect.Lean.Engine.DataFeeds;
@@ -270,9 +272,400 @@ namespace QuantConnect.Tests.Algorithm
 
             var indicatorValues = _algorithm.IndicatorHistory(indicator, new[] { _equity, referenceSymbol }, TimeSpan.FromDays(50), Resolution.Daily);
             var lastPoint = indicatorValues.Last();
-            Assert.AreEqual(0.477585951081753m, lastPoint.Price);
-            Assert.AreEqual(0.477585951081753m, lastPoint.Current.Value);
+            Assert.AreEqual(0.664648990718509m, lastPoint.Price);
+            Assert.AreEqual(0.664648990718509m, lastPoint.Current.Value);
+            Assert.AreEqual(indicator.Current.Value, lastPoint.Current.Value);
             Assert.AreEqual(new DateTime(2013, 10, 10, 16, 0, 0), lastPoint.Current.EndTime);
+        }
+
+        [Test]
+        public void LeastSquaresMovingAverageWithReferenceCalculation()
+        {
+            var period = 10;
+            var referenceSymbol = Symbol.Create("IBM", SecurityType.Equity, Market.USA);
+            var indicator = new LeastSquaresMovingAverageWithReference(_equity, referenceSymbol, period);
+            _algorithm.SetDateTime(new DateTime(2013, 10, 11));
+
+            // Fit the target closes on the reference closes of the last period time steps both symbols
+            // have a price for, using the ordinary least squares closed form
+            var targetCloses = new List<double>();
+            var referenceCloses = new List<double>();
+            foreach (var slice in _algorithm.History(new[] { _equity, referenceSymbol }, TimeSpan.FromDays(50), Resolution.Daily))
+            {
+                if (slice.Bars.ContainsKey(_equity) && slice.Bars.ContainsKey(referenceSymbol))
+                {
+                    targetCloses.Add((double)slice.Bars[_equity].Close);
+                    referenceCloses.Add((double)slice.Bars[referenceSymbol].Close);
+                }
+            }
+            var target = targetCloses.TakeLast(period).ToList();
+            var reference = referenceCloses.TakeLast(period).ToList();
+            var sumX = reference.Sum();
+            var sumY = target.Sum();
+            var expectedSlope = (period * reference.Zip(target, (x, y) => x * y).Sum() - sumX * sumY)
+                / (period * reference.Sum(x => x * x) - sumX * sumX);
+            var expectedIntercept = (sumY - expectedSlope * sumX) / period;
+            var expectedValue = expectedIntercept + expectedSlope * reference[^1];
+
+            var indicatorValues = _algorithm.IndicatorHistory(indicator, new[] { _equity, referenceSymbol }, TimeSpan.FromDays(50), Resolution.Daily);
+
+            Assert.AreEqual(expectedSlope, (double)indicator.Slope.Current.Value, 1e-6);
+            Assert.AreEqual(expectedIntercept, (double)indicator.Intercept.Current.Value, 1e-6);
+            Assert.AreEqual(expectedValue, (double)indicator.Current.Value, 1e-6);
+            Assert.AreEqual(new DateTime(2013, 10, 10, 16, 0, 0), indicator.Current.EndTime);
+
+            var lastPoint = indicatorValues.Last();
+            Assert.AreEqual(new DateTime(2013, 10, 10, 16, 0, 0), lastPoint.Current.EndTime);
+            Assert.AreEqual(indicator.Current.Value, lastPoint.Current.Value);
+            Assert.AreEqual(indicator.Slope.Current.Value, lastPoint["Slope"].Value);
+        }
+
+        [Test]
+        public void MultiSymbolIndicatorHistoryMatchesSynchronizedUpdates()
+        {
+            var symbols = new[]
+            {
+                Symbol.Create("AAPL", SecurityType.Equity, Market.USA),
+                Symbol.Create("IBM", SecurityType.Equity, Market.USA)
+            };
+            var prices = new[]
+            {
+                new[] { 10m, 9.62m, 9.35m, 9.47m, 9.89m },
+                new[] { 20m, 20.95m, 20m, 20.72m, 20.28m }
+            };
+            var slices = Enumerable.Range(0, 5).Select(day =>
+            {
+                var bars = symbols.Select((symbol, i) =>
+                {
+                    var price = prices[i][day];
+                    return new TradeBar(new DateTime(2024, 1, 1).AddDays(day), symbol, price, price, price, price, 1000, TimeSpan.FromDays(1));
+                }).ToList();
+                return new Slice(bars[0].EndTime, bars, bars[0].EndTime);
+            }).ToList();
+
+            var direct = new Correlation(symbols[0], symbols[1], 3);
+            var expected = new List<IndicatorDataPoint>();
+            foreach (var slice in slices)
+            {
+                foreach (var bar in slice.Bars.Values)
+                {
+                    direct.Update(bar);
+                }
+                if (direct.IsReady)
+                {
+                    expected.Add(direct.Current);
+                }
+            }
+
+            var indicatorValues = _algorithm.IndicatorHistory(new Correlation(symbols[0], symbols[1], 3), slices);
+
+            Assert.AreEqual(3, expected.Count);
+            CollectionAssert.AreEqual(expected.Select(x => x.EndTime), indicatorValues.Select(x => x.EndTime));
+            CollectionAssert.AreEqual(expected.Select(x => x.Value), indicatorValues.Current.Select(x => x.Value));
+            CollectionAssert.AreEqual(expected.Select(x => x.Value), indicatorValues.Select(x => x.Current.Value));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void IndicatorHistoryUsesTradeBarsWhenSliceAlsoHasQuoteBars(bool addSecurity)
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            if (addSecurity)
+            {
+                _algorithm.AddFutureContract(symbol);
+            }
+            var slices = GetTradeAndQuoteSlices(symbol);
+
+            var sma = _algorithm.IndicatorHistory(new SimpleMovingAverage(1), slices);
+            var atr = _algorithm.IndicatorHistory(new AverageTrueRange(1), slices);
+
+            CollectionAssert.AreEqual(new[] { 100m, 101m, 102m }, sma.Current.Select(x => x.Value));
+            // the true range of each trade bar, open = high = low = close, is zero
+            CollectionAssert.AreEqual(new[] { 0m, 1m, 1m }, atr.Current.Select(x => x.Value));
+        }
+
+        [Test]
+        public void IndicatorHistoryUsesQuoteBarsWhenSelectorRequiresThem()
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            var slices = GetTradeAndQuoteSlices(symbol);
+
+            var sma = _algorithm.IndicatorHistory(new SimpleMovingAverage(1), slices, Field.BidClose);
+
+            CollectionAssert.AreEqual(new[] { 200m, 201m, 202m }, sma.Current.Select(x => x.Value));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void IndicatorHistoryUsesQuoteBarsOfIndicatorRegisteredWithQuoteConsolidator(bool quoteBarLast)
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            _algorithm.AddFutureContract(symbol);
+            var sma = new SimpleMovingAverage(1);
+            _algorithm.RegisterIndicator(symbol, sma, _algorithm.ResolveConsolidator(symbol, Resolution.Hour, typeof(QuoteBar)));
+            var slices = GetTradeAndQuoteSlices(symbol, quoteBarLast: quoteBarLast);
+
+            var history = _algorithm.IndicatorHistory(sma, slices);
+
+            CollectionAssert.AreEqual(new[] { 200m, 201m, 202m }, history.Current.Select(x => x.Value));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void IndicatorHistoryUsesQuoteBarsOfIndicatorRegisteredOnQuoteTicks(bool quoteBarLast)
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            _algorithm.AddFutureContract(symbol, Resolution.Tick);
+            var sma = new SimpleMovingAverage(1);
+            _algorithm.RegisterIndicator(symbol, sma, new TickQuoteBarConsolidator(TimeSpan.FromHours(1)));
+            var slices = GetTradeAndQuoteSlices(symbol, quoteBarLast: quoteBarLast);
+
+            var history = _algorithm.IndicatorHistory(sma, slices);
+
+            CollectionAssert.AreEqual(new[] { 200m, 201m, 202m }, history.Current.Select(x => x.Value));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void IndicatorHistoryUsesTradeBarsOfIndicatorRegisteredByHelper(bool quoteBarLast)
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            _algorithm.AddFutureContract(symbol);
+            var sma = _algorithm.SMA(symbol, 1, Resolution.Hour);
+            var slices = GetTradeAndQuoteSlices(symbol, quoteBarLast: quoteBarLast);
+
+            var history = _algorithm.IndicatorHistory(sma, slices);
+
+            CollectionAssert.AreEqual(new[] { 100m, 101m, 102m }, history.Current.Select(x => x.Value));
+        }
+
+        [Test]
+        public void IndicatorHistoryKeepsQuoteBarsForCustomQuoteSelectors()
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            var slices = GetTradeAndQuoteSlices(symbol);
+
+            var castSelector = _algorithm.IndicatorHistory(new SimpleMovingAverage(1), slices, x => ((QuoteBar)x).Bid.Close);
+            var wrappedFieldSelector = _algorithm.IndicatorHistory(new SimpleMovingAverage(1), slices, x => Field.BidClose(x));
+
+            CollectionAssert.AreEqual(new[] { 200m, 201m, 202m }, castSelector.Current.Select(x => x.Value));
+            CollectionAssert.AreEqual(new[] { 200m, 201m, 202m }, wrappedFieldSelector.Current.Select(x => x.Value));
+        }
+
+        [Test]
+        public void IndicatorHistoryUsesQuoteBarsForQuoteOnlySecurities()
+        {
+            var symbol = _algorithm.AddForex("EURUSD").Symbol;
+            var slices = GetTradeAndQuoteSlices(symbol, includeTrades: false);
+
+            var sma = _algorithm.IndicatorHistory(new SimpleMovingAverage(1), slices);
+
+            CollectionAssert.AreEqual(new[] { 200m, 201m, 202m }, sma.Current.Select(x => x.Value));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void IndicatorHistoryUsesTicks(bool subscribed)
+        {
+            var symbol = subscribed ? _equity : Symbol.Create("AAPL", SecurityType.Equity, Market.USA);
+            var slices = Enumerable.Range(0, 3).Select(i =>
+            {
+                var time = new DateTime(2013, 10, 7, 10, 0, i);
+                var tick = new Tick(time, symbol, string.Empty, string.Empty, 10, 100 + i);
+                return new Slice(time, new List<BaseData> { tick }, time);
+            }).ToList();
+
+            var sma = _algorithm.IndicatorHistory(new SimpleMovingAverage(1), slices);
+
+            CollectionAssert.AreEqual(new[] { 100m, 101m, 102m }, sma.Current.Select(x => x.Value));
+        }
+
+        [Test]
+        public void IndicatorHistoryUsesCustomDataWithoutSubscription()
+        {
+            var symbol = Symbol.Create("CUSTOM", SecurityType.Base, Market.USA);
+            var slices = Enumerable.Range(0, 3).Select(i =>
+            {
+                var time = new DateTime(2013, 10, 7).AddDays(i);
+                var data = new UnlinkedData { Symbol = symbol, Time = time, EndTime = time.AddDays(1), Value = 100 + i };
+                return new Slice(data.EndTime, new List<BaseData> { data }, data.EndTime);
+            }).ToList();
+
+            var sma = _algorithm.IndicatorHistory(new SimpleMovingAverage(1), slices);
+
+            CollectionAssert.AreEqual(new[] { 100m, 101m, 102m }, sma.Current.Select(x => x.Value));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void IndicatorHistoryUsesTradeBarsOfHelperWithCloseField(bool quoteBarLast)
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            _algorithm.AddFutureContract(symbol);
+            var sma = _algorithm.SMA(symbol, 1, Resolution.Hour, Field.Close);
+            var slices = GetTradeAndQuoteSlices(symbol, quoteBarLast: quoteBarLast);
+
+            var history = _algorithm.IndicatorHistory(sma, slices, Field.Close);
+
+            CollectionAssert.AreEqual(new[] { 100m, 101m, 102m }, history.Current.Select(x => x.Value));
+        }
+
+        public enum IndicatorRegistration
+        {
+            Helper,
+            UnregisteredWithSecurity,
+            UnregisteredWithoutSecurity
+        }
+
+        [Test]
+        public void IndicatorHistoryUsesTradeBarsForBarTypeAgnosticFields(
+            [Values(nameof(Field.Open), nameof(Field.High), nameof(Field.Low), nameof(Field.Close), nameof(Field.Average),
+                nameof(Field.Median), nameof(Field.Typical), nameof(Field.Weighted), nameof(Field.SevenBar))] string fieldName,
+            [Values] IndicatorRegistration registration,
+            [Values] bool quoteBarLast)
+        {
+            var field = (Func<IBaseData, decimal>)typeof(Field).GetProperty(fieldName).GetValue(null);
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            if (registration != IndicatorRegistration.UnregisteredWithoutSecurity)
+            {
+                _algorithm.AddFutureContract(symbol);
+            }
+            var sma = registration == IndicatorRegistration.Helper
+                ? _algorithm.SMA(symbol, 1, Resolution.Hour, field)
+                : new SimpleMovingAverage(1);
+            var slices = GetTradeAndQuoteSlices(symbol, quoteBarLast: quoteBarLast);
+
+            var history = _algorithm.IndicatorHistory(sma, slices, field);
+
+            // open = high = low = close for every bar, so each field gives the close
+            CollectionAssert.AreEqual(new[] { 100m, 101m, 102m }, history.Current.Select(x => x.Value));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void IndicatorHistoryUsesTradeBarsOfHelperWithCustomTradeSelector(bool quoteBarLast)
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            _algorithm.AddFutureContract(symbol);
+            var max = _algorithm.MAX(symbol, 1, Resolution.Hour);
+            var slices = GetTradeAndQuoteSlices(symbol, quoteBarLast: quoteBarLast);
+
+            var history = _algorithm.IndicatorHistory(max, slices, x => ((TradeBar)x).High);
+
+            CollectionAssert.AreEqual(new[] { 100m, 101m, 102m }, history.Current.Select(x => x.Value));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void IndicatorHistoryUsesQuoteBarsOfQuoteRegisteredIndicatorWithCustomQuoteSelector(bool quoteBarLast)
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            _algorithm.AddFutureContract(symbol);
+            var sma = new SimpleMovingAverage(1);
+            _algorithm.RegisterIndicator(symbol, sma, _algorithm.ResolveConsolidator(symbol, Resolution.Hour, typeof(QuoteBar)));
+            var slices = GetTradeAndQuoteSlices(symbol, quoteBarLast: quoteBarLast);
+
+            var history = _algorithm.IndicatorHistory(sma, slices, x => ((QuoteBar)x).Bid.Close);
+
+            CollectionAssert.AreEqual(new[] { 200m, 201m, 202m }, history.Current.Select(x => x.Value));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void IndicatorHistoryUsesTradeBarsOfHelperWithCustomBarSelector(bool quoteBarLast)
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            _algorithm.AddFutureContract(symbol);
+            var atr = _algorithm.ATR(symbol, 1, resolution: Resolution.Hour);
+            var slices = GetTradeAndQuoteSlices(symbol, quoteBarLast: quoteBarLast);
+            var selectedTypes = new List<Type>();
+
+            _algorithm.IndicatorHistory(atr, slices, x =>
+            {
+                selectedTypes.Add(x.GetType());
+                return (IBaseDataBar)x;
+            });
+
+            CollectionAssert.AreEqual(new[] { typeof(TradeBar), typeof(TradeBar), typeof(TradeBar) }, selectedTypes);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void IndicatorHistoryUsesTheBarTypeTheSelectorNamesOverTheRegistration(bool quoteBarLast)
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            _algorithm.AddFutureContract(symbol);
+            var tradeRegistered = _algorithm.SMA(symbol, 1, Resolution.Hour);
+            var quoteRegistered = new SimpleMovingAverage(1);
+            _algorithm.RegisterIndicator(symbol, quoteRegistered, _algorithm.ResolveConsolidator(symbol, Resolution.Hour, typeof(QuoteBar)));
+            var slices = GetTradeAndQuoteSlices(symbol, quoteBarLast: quoteBarLast);
+
+            var bidClose = _algorithm.IndicatorHistory(tradeRegistered, slices, Field.BidClose);
+            var volume = _algorithm.IndicatorHistory(quoteRegistered, slices, Field.Volume);
+
+            CollectionAssert.AreEqual(new[] { 200m, 201m, 202m }, bidClose.Current.Select(x => x.Value));
+            CollectionAssert.AreEqual(new[] { 10m, 10m, 10m }, volume.Current.Select(x => x.Value));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void IndicatorHistoryThrowsForCustomQuoteSelectorOnTradeRegisteredIndicator(bool quoteBarLast)
+        {
+            var symbol = Symbol.CreateFuture("ES", Market.CME, new DateTime(2024, 3, 15));
+            _algorithm.AddFutureContract(symbol);
+            var sma = _algorithm.SMA(symbol, 1, Resolution.Hour);
+            var slices = GetTradeAndQuoteSlices(symbol, quoteBarLast: quoteBarLast);
+
+            // the live indicator gets trade bars, so this selector would throw on it too
+            Assert.Throws<InvalidCastException>(() => _algorithm.IndicatorHistory(sma, slices, x => ((QuoteBar)x).Bid.Close));
+        }
+
+        [Test]
+        public void FieldCloseIsASingleInstance()
+        {
+            Assert.AreSame(Field.Close, Field.Close);
+        }
+
+        private static List<Slice> GetTradeAndQuoteSlices(Symbol symbol, bool includeTrades = true, bool quoteBarLast = true)
+        {
+            return Enumerable.Range(0, 3).Select(i =>
+            {
+                var time = new DateTime(2024, 1, 2, 10 + i, 0, 0);
+                var price = 200m + i;
+                var data = new List<BaseData>
+                {
+                    new QuoteBar(time, symbol, new Bar(price, price, price, price), 1, new Bar(price, price, price, price), 1, TimeSpan.FromHours(1))
+                };
+                if (includeTrades)
+                {
+                    // the slice's default value for the symbol is its last bar
+                    data.Insert(quoteBarLast ? 0 : 1, new TradeBar(time, symbol, 100 + i, 100 + i, 100 + i, 100 + i, 10, TimeSpan.FromHours(1)));
+                }
+                return new Slice(time.AddHours(1), data, time.AddHours(1));
+            }).ToList();
+        }
+
+        [Test]
+        public void LeastSquaresMovingAverageWithReferenceIsWarmedUpByTheAlgorithm()
+        {
+            var referenceSymbol = _algorithm.AddEquity("IBM").Symbol;
+
+            var indicator = _algorithm.LSMA(_equity, referenceSymbol, 10, Resolution.Daily);
+
+            Assert.AreEqual("LSMA(10,day)", indicator.Name);
+            Assert.IsTrue(indicator.IsReady);
+            Assert.AreNotEqual(0m, indicator.Current.Value);
+            Assert.AreNotEqual(0m, indicator.Slope.Current.Value);
+        }
+
+        [Test]
+        public void HilbertTransformHelperUsesIndicatorName()
+        {
+            var indicator = _algorithm.HT(_equity, 7, 0.635m, 0.338m, Resolution.Minute);
+
+            Assert.AreEqual("HT(7, 0.635, 0.338,SPY_min)", indicator.Name);
+            Assert.AreEqual("HT(7, 0.635, 0.338,SPY_min)_inPhase", indicator.InPhase.Name);
+            Assert.AreEqual("HT(7, 0.635, 0.338,SPY_min)_quad", indicator.Quadrature.Name);
         }
 
         [TestCase(Language.Python)]
@@ -375,6 +768,46 @@ class CustomSimpleMovingAverage(PythonIndicator):
                 _algorithm.WarmUpIndicator(referenceSymbol, customIndicator, TimeSpan.FromMinutes(60));
                 Assert.IsTrue(customIndicator.GetAttr("is_ready").GetAndDispose<bool>());
                 Assert.IsTrue(customIndicator.GetAttr("samples").GetAndDispose<int>() >= 100);
+            }
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void InformationCoefficientHelpersAcceptCustomPythonSignals(bool inheritsPythonIndicator)
+        {
+            var symbols = new[] { _equity, _algorithm.AddEquity("AIG").Symbol, _algorithm.AddEquity("BAC").Symbol };
+            using (Py.GIL())
+            {
+                var module = PyModule.FromString(Guid.NewGuid().ToString(), $@"
+from AlgorithmImports import *
+
+class CustomMomentum({(inheritsPythonIndicator ? "PythonIndicator" : "object")}):
+    def __init__(self):
+        {(inheritsPythonIndicator ? "super().__init__()" : "self.is_ready = False")}
+        self.name = 'CustomMomentum'
+        self.warm_up_period = 2
+        self.value = 0
+        self.last_price = None
+
+    def update(self, input):
+        if self.last_price:
+            self.value = input.value / self.last_price - 1
+        ready = self.last_price is not None
+        {(inheritsPythonIndicator ? "" : "self.is_ready = ready")}
+        self.last_price = input.value
+        return ready
+
+def create(algorithm, symbols):
+    return algorithm.tsic(symbols[0], CustomMomentum(), 3), algorithm.csic(symbols, lambda symbol: CustomMomentum())
+");
+                using var indicators = module.GetAttr("create").Invoke(_algorithm.ToPython(), symbols.ToList().ToPython());
+                var timeSeries = indicators[0].GetAndDispose<TimeSeriesInformationCoefficient>();
+                var crossSectional = indicators[1].GetAndDispose<CrossSectionalInformationCoefficient>();
+
+                Assert.IsTrue(timeSeries.IsReady);
+                Assert.IsTrue(crossSectional.IsReady);
+                Assert.IsTrue(timeSeries.Signal.IsReady);
+                Assert.IsTrue(crossSectional.Signals.Values.All(signal => signal.IsReady));
             }
         }
 
@@ -574,7 +1007,7 @@ class GoodCustomIndicator:
         }
 
         [Test]
-        public void IndicatorHistoryDataFrameDoesNotCointainDefaultDateTimeIndex()
+        public void IndicatorHistoryDataFrameDoesNotContainDefaultDateTimeIndex()
         {
             var pandasConverter = new PandasConverter();
             var indicatorsDataPointPerProperty = new List<InternalIndicatorValues>
@@ -615,7 +1048,6 @@ class GoodCustomIndicator:
             dynamic dataframe = indicatorValues.DataFrame;
             using (Py.GIL())
             {
-                var index = dataframe.index;
                 var columns = dataframe.columns;
                 var expectedColumns = new List<string> { "smaprop", "genericprop", "current", "nongenericprop", "counter", "indicatortype", "description" };
                 var columnsCount = 0;
@@ -795,7 +1227,7 @@ def get_indicator(algo, symbol):
 
             using var pyAlgo = _algorithm.ToPython();
             using var pySymbol = symbol.ToPython();
-            var indicator = testModule.GetAttr("get_indicator").Invoke(pyAlgo, pySymbol).GetAndDispose<IndicatorBase>();
+            testModule.GetAttr("get_indicator").Invoke(pyAlgo, pySymbol).GetAndDispose<IndicatorBase>();
 
             // The indicator should have been updated during the warm-up period
             var lastInput = testModule.GetAttr("LastInputTracker").GetAttr("last_input").GetAndDispose<TradeBar>();
@@ -839,7 +1271,7 @@ def get_indicator(algo, symbol):
 
             using var pyAlgo = _algorithm.ToPython();
             using var pySymbol = symbol.ToPython();
-            var indicator = testModule.GetAttr("get_indicator").Invoke(pyAlgo, pySymbol).GetAndDispose<IndicatorBase>();
+            testModule.GetAttr("get_indicator").Invoke(pyAlgo, pySymbol).GetAndDispose<IndicatorBase>();
 
             // The indicator should have been updated during the warm-up period
             var lastInput = testModule.GetAttr("LastInputTracker").GetAttr("last_input").GetAndDispose<TradeBar>();

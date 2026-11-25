@@ -48,7 +48,7 @@ namespace QuantConnect.Orders.Slippage
             var lastData = asset.GetLastData();
             if (lastData == null) return 0;
 
-            var barVolume = 0m;
+            decimal barVolume;
             var slippagePercent = _volumeLimit * _volumeLimit * _priceImpact;
 
             switch (lastData.DataType)
@@ -86,7 +86,10 @@ namespace QuantConnect.Orders.Slippage
                 slippagePercent = volumeShare * volumeShare * _priceImpact;
             }
 
-            return slippagePercent * lastData.Value;
+            // Market on open orders fill at the bar open, which is the price we have to reference, not the bar close
+            var referencePrice = order.Type == OrderType.MarketOnOpen ? ((IBar)lastData).Open : lastData.Value;
+
+            return slippagePercent * referencePrice;
         }
     }
 }

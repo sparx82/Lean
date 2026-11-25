@@ -119,7 +119,8 @@ namespace QuantConnect.Lean.Engine.RealTime
         {
             Algorithm = algorithm;
             ResultHandler = resultHandler;
-            TimeMonitor = new TimeMonitor(GetTimeMonitorTimeout());
+            // surface long-running scheduled event warnings in the user's logs, not just the engine log
+            TimeMonitor = new TimeMonitor(GetTimeMonitorTimeout()) { UserWarningHandler = message => ResultHandler?.DebugMessage(message) };
             IsolatorLimitProvider = isolatorLimitProvider;
 
             if (job.Language == Language.CSharp)
@@ -168,7 +169,7 @@ namespace QuantConnect.Lean.Engine.RealTime
         }
 
         /// <summary>
-        /// Get's the timeout the scheduled task time monitor should use
+        /// Gets the timeout the scheduled task time monitor should use
         /// </summary>
         protected virtual int GetTimeMonitorTimeout()
         {

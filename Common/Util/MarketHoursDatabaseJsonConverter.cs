@@ -32,10 +32,10 @@ namespace QuantConnect.Util
     public class MarketHoursDatabaseJsonConverter : TypeChangeJsonConverter<MarketHoursDatabase, MarketHoursDatabaseJsonConverter.MarketHoursDatabaseJson>
     {
         /// <summary>
-        /// Convert the input value to a value to be serialzied
+        /// Convert the input value to a value to be serialized
         /// </summary>
-        /// <param name="value">The input value to be converted before serialziation</param>
-        /// <returns>A new instance of TResult that is to be serialzied</returns>
+        /// <param name="value">The input value to be converted before serialization</param>
+        /// <returns>A new instance of TResult that is to be serialized</returns>
         protected override MarketHoursDatabaseJson Convert(MarketHoursDatabase value)
         {
             return new MarketHoursDatabaseJson(value);
@@ -292,6 +292,7 @@ namespace QuantConnect.Util
                 var bankHolidayDates = BankHolidays.Select(x => DateTime.ParseExact(x, "M/d/yyyy", CultureInfo.InvariantCulture)).ToHashSet();
                 IReadOnlyDictionary<DateTime, TimeSpan> earlyCloses = EarlyCloses.ToDictionary(x => DateTime.ParseExact(x.Key, "M/d/yyyy", CultureInfo.InvariantCulture), x => x.Value);
                 IReadOnlyDictionary<DateTime, TimeSpan> lateOpens = LateOpens.ToDictionary(x => DateTime.ParseExact(x.Key, "M/d/yyyy", CultureInfo.InvariantCulture), x => x.Value);
+                var exchangeTimeZone = DateTimeZoneProviders.Tzdb[ExchangeTimeZone];
 
                 if(underlyingEntry != null)
                 {
@@ -306,19 +307,28 @@ namespace QuantConnect.Util
                     }
                     if (earlyCloses.Count == 0)
                     {
-                        earlyCloses = underlyingEntry.ExchangeHours.EarlyCloses;
+                        earlyCloses = ConvertTimeZone(underlyingEntry.ExchangeHours.EarlyCloses, underlyingEntry.ExchangeHours.TimeZone, exchangeTimeZone);
                     }
                     if (lateOpens.Count == 0)
                     {
-                        lateOpens = underlyingEntry.ExchangeHours.LateOpens;
+                        lateOpens = ConvertTimeZone(underlyingEntry.ExchangeHours.LateOpens, underlyingEntry.ExchangeHours.TimeZone, exchangeTimeZone);
                     }
                 }
 
                 if(marketEntry != null)
                 {
-                    if (marketEntry.ExchangeHours.Holidays.Count > 0)
+                    foreach (var holiday in marketEntry.ExchangeHours.Holidays)
                     {
-                        holidayDates.UnionWith(marketEntry.ExchangeHours.Holidays);
+                        // an early close or late open of this entry on a market-wide holiday means this entry trades on that date,
+                        // but expiration rules should still skip it, the same as a bank holiday
+                        if (earlyCloses.ContainsKey(holiday) || lateOpens.ContainsKey(holiday))
+                        {
+                            bankHolidayDates.Add(holiday);
+                        }
+                        else
+                        {
+                            holidayDates.Add(holiday);
+                        }
                     }
 
                     if (marketEntry.ExchangeHours.BankHolidays.Count > 0)
@@ -328,16 +338,18 @@ namespace QuantConnect.Util
 
                     if (marketEntry.ExchangeHours.EarlyCloses.Count > 0 )
                     {
-                        earlyCloses = MergeLateOpensAndEarlyCloses(marketEntry.ExchangeHours.EarlyCloses, earlyCloses);
+                        earlyCloses = MergeLateOpensAndEarlyCloses(
+                            ConvertTimeZone(marketEntry.ExchangeHours.EarlyCloses, marketEntry.ExchangeHours.TimeZone, exchangeTimeZone), earlyCloses);
                     }
 
                     if (marketEntry.ExchangeHours.LateOpens.Count > 0)
                     {
-                        lateOpens = MergeLateOpensAndEarlyCloses(marketEntry.ExchangeHours.LateOpens, lateOpens);
+                        lateOpens = MergeLateOpensAndEarlyCloses(
+                            ConvertTimeZone(marketEntry.ExchangeHours.LateOpens, marketEntry.ExchangeHours.TimeZone, exchangeTimeZone), lateOpens);
                     }
                 }
 
-                var exchangeHours = new SecurityExchangeHours(DateTimeZoneProviders.Tzdb[ExchangeTimeZone], holidayDates, hours, earlyCloses, lateOpens, bankHolidayDates);
+                var exchangeHours = new SecurityExchangeHours(exchangeTimeZone, holidayDates, hours, earlyCloses, lateOpens, bankHolidayDates);
                 return new MarketHoursDatabase.Entry(DateTimeZoneProviders.Tzdb[DataTimeZone], exchangeHours);
             }
 
@@ -352,6 +364,27 @@ namespace QuantConnect.Util
                 {
                     segments = new List<MarketHoursSegment>();
                 }
+            }
+
+            /// <summary>
+            /// Converts the late opens or early closes inherited from another entry into this entry's exchange time zone,
+            /// so that they keep their instant when both entries are in different time zones
+            /// </summary>
+            private static IReadOnlyDictionary<DateTime, TimeSpan> ConvertTimeZone(IReadOnlyDictionary<DateTime, TimeSpan> times,
+                DateTimeZone from, DateTimeZone to)
+            {
+                if (from.Equals(to))
+                {
+                    return times;
+                }
+
+                var result = new Dictionary<DateTime, TimeSpan>(times.Count);
+                foreach (var (date, time) in times)
+                {
+                    var converted = (date + time).ConvertTo(from, to);
+                    result[converted.Date] = converted.TimeOfDay;
+                }
+                return result;
             }
 
             /// <summary>

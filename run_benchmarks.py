@@ -11,6 +11,12 @@ if len(sys.argv) > 1:
 	dataPath = sys.argv[1]
 print(f'Using data path {dataPath}')
 
+# optional json file with the algorithms to run per language, such as the failures written by compare_benchmarks.py
+algorithmsToRun = None
+if len(sys.argv) > 2:
+	algorithmsToRun = json.load(open(sys.argv[2]))
+	print(f'Running only algorithms {algorithmsToRun}')
+
 results = {}
 for baseDirectory in ["Algorithm.CSharp/Benchmarks", "Algorithm.Python/Benchmarks"]:
 
@@ -25,34 +31,31 @@ for baseDirectory in ["Algorithm.CSharp/Benchmarks", "Algorithm.Python/Benchmark
 			if "Fine" in algorithmName:
 				# we skip fundamental benchmarks for now
 				continue
+			if algorithmsToRun is not None and algorithmName not in algorithmsToRun.get(language, []):
+				continue
 			algorithmLocation = "QuantConnect.Algorithm.CSharp.dll" if language == "CSharp" else os.path.join("../../../", baseDirectory, algorithmFile)
 			print(f'Start running algorithm {algorithmName} language {language}...')
 
 			dataPointsPerSecond = []
 			benchmarkLengths = []
-			for x in range(1, 3):
+			subprocess.run(["dotnet", "./QuantConnect.Lean.Launcher.dll",
+				"--data-folder " + dataPath,
+				"--algorithm-language " + language,
+				"--algorithm-type-name " + algorithmName,
+				"--algorithm-location " + algorithmLocation,
+				"--log-handler ConsoleErrorLogHandler",
+				"--close-automatically true"],
+				cwd="./Launcher/bin/Release",
+				stdout=subprocess.DEVNULL,
+				stderr=subprocess.DEVNULL)
 
-				subprocess.run(["dotnet", "./QuantConnect.Lean.Launcher.dll",
-					"--data-folder " + dataPath,
-					"--algorithm-language " + language,
-					"--algorithm-type-name " + algorithmName,
-					"--algorithm-location " + algorithmLocation,
-					"--log-handler ConsoleErrorLogHandler",
-					"--close-automatically true"],
-					cwd="./Launcher/bin/Release",
-					stdout=subprocess.DEVNULL,
-					stderr=subprocess.DEVNULL)
-				if x == 1:
-					# skip first run
-					continue
-
-				algorithmLogs = os.path.join("./Launcher/bin/Release", algorithmName + "-log.txt")
-				file = open(algorithmLogs, 'r')
-				for line in file.readlines():
-					for match in re.findall(r"(\d+)k data points per second", line):
-						dataPointsPerSecond.append(int(match))
-					for match in re.findall(r" completed in (\d+)", line):
-						benchmarkLengths.append(int(match))
+			algorithmLogs = os.path.join("./Launcher/bin/Release", algorithmName + "-log.txt")
+			file = open(algorithmLogs, 'r')
+			for line in file.readlines():
+				for match in re.findall(r"(\d+)k data points per second", line):
+					dataPointsPerSecond.append(int(match))
+				for match in re.findall(r" completed in (\d+)", line):
+					benchmarkLengths.append(int(match))
 
 			averageDps = statistics.mean(dataPointsPerSecond)
 			averageLength = statistics.mean(benchmarkLengths)

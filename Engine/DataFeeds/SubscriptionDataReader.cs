@@ -396,7 +396,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                         return false;
                     }
 
-                    // we've made it past all of our filters, we're withing the requested start/end of the subscription,
+                    // we've made it past all of our filters, we're within the requested start/end of the subscription,
                     // we've satisfied user and market hour filters, so this data is good to go as current
                     Current = instance;
 
@@ -519,7 +519,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                 switch (args.Source.TransportMedium)
                 {
                     case SubscriptionTransportMedium.LocalFile:
-                        // the local uri doesn't exist, write an error and return null so we we don't try to get data for today
+                        // the local uri doesn't exist, write an error and return null so we don't try to get data for today
                         // Log.Trace(string.Format("SubscriptionDataReader.GetReader(): Could not find QC Data, skipped: {0}", source));
                         break;
 

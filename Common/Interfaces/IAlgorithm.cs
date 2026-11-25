@@ -33,7 +33,7 @@ using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Algorithm.Framework.Alphas;
 using QuantConnect.Algorithm.Framework.Alphas.Analysis;
 using QuantConnect.Commands;
-using Common.Util;
+using QuantConnect.Util;
 
 namespace QuantConnect.Interfaces
 {
@@ -65,7 +65,7 @@ namespace QuantConnect.Interfaces
         }
 
         /// <summary>
-        /// Data subscription manager controls the information and subscriptions the algorithms recieves.
+        /// Data subscription manager controls the information and subscriptions the algorithms receives.
         /// Subscription configurations can be added through the Subscription Manager.
         /// </summary>
         SubscriptionManager SubscriptionManager
@@ -83,7 +83,7 @@ namespace QuantConnect.Interfaces
         }
 
         /// <summary>
-        /// Security object collection class stores an array of objects representing representing each security/asset
+        /// Security object collection class stores an array of objects representing each security/asset
         /// we have a subscription for.
         /// </summary>
         /// <remarks>It is an IDictionary implementation and can be indexed by symbol</remarks>
@@ -113,7 +113,7 @@ namespace QuantConnect.Interfaces
         /// <summary>
         /// Security transaction manager class controls the store and processing of orders.
         /// </summary>
-        /// <remarks>The orders and their associated events are accessible here. When a new OrderEvent is recieved the algorithm portfolio is updated.</remarks>
+        /// <remarks>The orders and their associated events are accessible here. When a new OrderEvent is received the algorithm portfolio is updated.</remarks>
         SecurityTransactionManager Transactions
         {
             get;
@@ -407,6 +407,12 @@ namespace QuantConnect.Interfaces
         ObjectStore ObjectStore { get; }
 
         /// <summary>
+        /// Gets a read-only view of the deployment details shared by the brokerage, data queue handler or any other component,
+        /// for example account information. Usually empty when not running in live mode
+        /// </summary>
+        ReadOnlyExtendedDictionary<string, string> DeploymentDetails { get; }
+
+        /// <summary>
         /// Returns the current Slice object
         /// </summary>
         Slice CurrentSlice { get; }
@@ -473,6 +479,12 @@ namespace QuantConnect.Interfaces
         /// </summary>
         /// <param name="parameters">Dictionary containing the parameter names to values</param>
         void SetParameters(Dictionary<string, string> parameters);
+
+        /// <summary>
+        /// Sets the deployment details read-only view
+        /// </summary>
+        /// <param name="deploymentDetails">The deployment details</param>
+        void SetDeploymentDetails(ReadOnlyExtendedDictionary<string, string> deploymentDetails);
 
         /// <summary>
         /// Determines if the Symbol is shortable at the brokerage

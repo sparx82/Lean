@@ -153,6 +153,15 @@ namespace QuantConnect.Orders
         }
 
         /// <summary>
+        /// Gets the current contingency of this order: the set of contingent orders it belongs to (OCO, OTO, OUO, brackets)
+        /// and how it relates to them. Null if it's not a contingent order
+        /// </summary>
+        public OrderContingency Contingency
+        {
+            get { return _order == null ? _submitRequest.Contingency : _order.Contingency; }
+        }
+
+        /// <summary>
         /// Gets the <see cref="SubmitOrderRequest"/> that initiated this order
         /// </summary>
         public SubmitOrderRequest SubmitRequest
@@ -590,7 +599,7 @@ namespace QuantConnect.Orders
         /// This method is thread safe.
         /// </remarks>
         /// <param name="request">The <see cref="CancelOrderRequest"/> that canceled this ticket.</param>
-        /// <returns>False if the the CancelRequest has already been set, true if this call set it</returns>
+        /// <returns>False if the CancelRequest has already been set, true if this call set it</returns>
         internal bool TrySetCancelRequest(CancelOrderRequest request)
         {
             if (request.OrderId != OrderId)
@@ -683,6 +692,7 @@ namespace QuantConnect.Orders
         /// an error, where it will return the integer value of the <see cref="OrderResponseErrorCode"/> from
         /// the most recent response
         /// </summary>
+        [StubsIgnore]
         public static implicit operator int(OrderTicket ticket)
         {
             var response = ticket.GetMostRecentOrderResponse();

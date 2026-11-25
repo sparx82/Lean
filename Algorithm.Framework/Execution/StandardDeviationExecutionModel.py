@@ -78,6 +78,11 @@ class StandardDeviationExecutionModel(ExecutionModel):
             algorithm: The algorithm instance that experienced the change in securities
             changes: The security additions and removals from the algorithm'''
         for added in changes.added_securities:
+            data = self._symbol_data.get(added.symbol, None)
+            if data and not ExecutionModel.is_consolidator_receiving_data(algorithm, added.symbol, data.consolidator):
+                self._symbol_data.pop(added.symbol)
+                algorithm.subscription_manager.remove_consolidator(added.symbol, data.consolidator)
+
             if added.symbol not in self._symbol_data:
                 self._symbol_data[added.symbol] = SymbolData(algorithm, added, self.period, self.resolution)
 

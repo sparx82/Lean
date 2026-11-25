@@ -18,12 +18,16 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using QuantConnect.Algorithm;
 using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
+using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 using QuantConnect.Securities.Future;
 using QuantConnect.Securities.Option;
@@ -39,6 +43,103 @@ namespace QuantConnect.Tests.Common.Securities
         private FutureMarginModel _futureMarginModel;
 
         [Test]
+        public void ConcurrentMarginLookupsKeepTheHistoryIndexInRange()
+        {
+            var symbol = Symbol.CreateFuture("MARGIN-RACE", Market.USA, new DateTime(2030, 1, 1));
+            var date = new DateTime(2026, 1, 1);
+            var security = MarginSecurity(symbol, date);
+            var history = Enumerable.Range(0, 5000).Select(i => new MarginRequirementsEntry
+            {
+                Date = date.AddDays(i - 5000),
+                InitialOvernight = i + 1,
+                MaintenanceOvernight = i + 1
+            }).ToArray();
+            using var cache = new MarginHistoryCache(symbol, history);
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                var model = new FutureMarginModel(security: security);
+                using var start = new Barrier(16);
+                var tasks = Enumerable.Range(0, 16).Select(_ => Task.Factory.StartNew(() =>
+                {
+                    start.SignalAndWait();
+                    return model.GetInitialMarginRequirement(new InitialMarginParameters(security, 1)).Value;
+                }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
+                Task.WaitAll(tasks);
+                Assert.IsTrue(tasks.All(t => t.Result == 5000));
+                Assert.AreEqual(5000, model.InitialOvernightMarginRequirement);
+            }
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void MarginLookupsRecoverAfterTheCachedHistoryIsReplaced(bool futureRows)
+        {
+            var symbol = Symbol.CreateFuture("MARGIN-RELOAD", Market.USA, new DateTime(2030, 1, 1));
+            var date = new DateTime(2026, 1, 5);
+            var security = MarginSecurity(symbol, date);
+            var history = Enumerable.Range(1, 5).Select(i => new MarginRequirementsEntry
+            {
+                Date = new DateTime(2026, 1, i),
+                InitialOvernight = 100 * i
+            }).ToArray();
+            using var cache = new MarginHistoryCache(symbol, history);
+            var model = new FutureMarginModel(security: security);
+            Assert.AreEqual(500, model.InitialOvernightMarginRequirement);
+            cache.Replace(new[] { new MarginRequirementsEntry { Date = date, InitialOvernight = 750 } }
+                .Concat(futureRows ? history.Select(e => new MarginRequirementsEntry
+                {
+                    Date = e.Date.AddDays(10),
+                    InitialOvernight = e.InitialOvernight
+                }) : Array.Empty<MarginRequirementsEntry>()).ToArray());
+            Assert.AreEqual(750, model.InitialOvernightMarginRequirement);
+        }
+
+        private static Future MarginSecurity(Symbol symbol, DateTime date)
+        {
+            var tz = TimeZones.NewYork;
+            var security = new Future(SecurityExchangeHours.AlwaysOpen(tz),
+                new SubscriptionDataConfig(typeof(TradeBar), symbol, Resolution.Minute, tz, tz, true, false, false),
+                new Cash(Currencies.USD, 0, 1m),
+                new OptionSymbolProperties(SymbolProperties.GetDefault(Currencies.USD)),
+                ErrorCurrencyConverter.Instance, RegisteredSecurityDataTypesProvider.Null);
+            security.SetMarketPrice(new Tick { Symbol = symbol, Value = 100, Time = date });
+            return security;
+        }
+
+        private sealed class MarginHistoryCache : IDisposable
+        {
+            private static readonly FieldInfo Cache = typeof(FutureMarginModel).GetField("_marginRequirementsCache", BindingFlags.Static | BindingFlags.NonPublic);
+            private static readonly object Locker = typeof(FutureMarginModel).GetField("_locker", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+            private readonly string _key;
+
+            public MarginHistoryCache(Symbol symbol, MarginRequirementsEntry[] history)
+            {
+                _key = symbol.ID.Symbol;
+                Replace(history);
+            }
+
+            public void Replace(MarginRequirementsEntry[] history)
+            {
+                lock (Locker)
+                {
+                    var entries = new Dictionary<string, MarginRequirementsEntry[]>((Dictionary<string, MarginRequirementsEntry[]>)Cache.GetValue(null));
+                    entries[_key] = history;
+                    Cache.SetValue(null, entries);
+                }
+            }
+
+            public void Dispose()
+            {
+                lock (Locker)
+                {
+                    var entries = new Dictionary<string, MarginRequirementsEntry[]>((Dictionary<string, MarginRequirementsEntry[]>)Cache.GetValue(null));
+                    entries.Remove(_key);
+                    Cache.SetValue(null, entries);
+                }
+            }
+        }
+
+        [Test]
         public void TestMarginForSymbolWithOneLinerHistory()
         {
             const decimal price = 1.2345m;
@@ -46,7 +147,7 @@ namespace QuantConnect.Tests.Common.Securities
             var expDate = new DateTime(2017, 1, 1);
             var tz = TimeZones.NewYork;
 
-            // For this symbol we dont have any history, but only one date and margins line
+            // For this symbol we don't have any history, but only one date and margins line
             var ticker = QuantConnect.Securities.Futures.Softs.Coffee;
             var symbol = Symbol.CreateFuture(ticker, Market.ICE, expDate);
 
@@ -76,7 +177,7 @@ namespace QuantConnect.Tests.Common.Securities
             var expDate = new DateTime(2017, 1, 1);
             var tz = TimeZones.NewYork;
 
-            // For this symbol we dont have any history at all
+            // For this symbol we don't have any history at all
             var ticker = "NOT-A-SYMBOL";
             var symbol = Symbol.CreateFuture(ticker, Market.USA, expDate);
 
@@ -103,7 +204,7 @@ namespace QuantConnect.Tests.Common.Securities
             var expDate = new DateTime(2017, 1, 1);
             var tz = TimeZones.NewYork;
 
-            // For this symbol we dont have history
+            // For this symbol we don't have history
             var ticker = QuantConnect.Securities.Futures.Financials.EuroDollar;
             var symbol = Symbol.CreateFuture(ticker, Market.CME, expDate);
 
@@ -396,6 +497,91 @@ namespace QuantConnect.Tests.Common.Securities
                     0)));
         }
 
+        [Test]
+        public void GetMaximumOrderQuantityForDeltaBuyingPower_AllowsReducingLeveragedTarget()
+        {
+            var algorithm = new QCAlgorithm();
+            algorithm.SetFinishedWarmingUp();
+            algorithm.SubscriptionManager.SetDataManager(new DataManagerStub(algorithm));
+
+            var ticker = QuantConnect.Securities.Futures.Financials.EuroDollar;
+            var futureSecurity = algorithm.AddFuture(ticker);
+            Update(futureSecurity, 100, algorithm);
+
+            algorithm.Portfolio.SetCash(1000);
+            futureSecurity.Holdings.SetHoldings(100, 10);
+            algorithm.Portfolio.InvalidateTotalPortfolioValue();
+
+            var usedBuyingPower = futureSecurity.BuyingPowerModel.GetReservedBuyingPowerForPosition(
+                new ReservedBuyingPowerForPositionParameters(futureSecurity)).AbsoluteUsedBuyingPower;
+            var totalPortfolioValue = algorithm.Portfolio.TotalPortfolioValue;
+            var targetBuyingPower = 1.1m * totalPortfolioValue;
+            var deltaBuyingPower = targetBuyingPower - usedBuyingPower;
+
+            Assert.Greater(Math.Abs(usedBuyingPower / totalPortfolioValue), 1m);
+            Assert.Less(deltaBuyingPower, 0m);
+
+            Assert.DoesNotThrow(() =>
+            {
+                var result = futureSecurity.BuyingPowerModel.GetMaximumOrderQuantityForDeltaBuyingPower(
+                    new GetMaximumOrderQuantityForDeltaBuyingPowerParameters(
+                        algorithm.Portfolio,
+                        futureSecurity,
+                        deltaBuyingPower,
+                        0
+                    ));
+                Assert.Less(result.Quantity, 0m);
+            });
+        }
+
+        [TestCase(10)]
+        [TestCase(-10)]
+        public void GetMaximumOrderQuantityForTargetBuyingPower_ThrowsForLeveragedTargetReducingTheHoldings(int quantity)
+        {
+            var algorithm = new QCAlgorithm();
+            algorithm.SetFinishedWarmingUp();
+            algorithm.SubscriptionManager.SetDataManager(new DataManagerStub(algorithm));
+            var futureSecurity = algorithm.AddFuture(QuantConnect.Securities.Futures.Financials.EuroDollar);
+            Update(futureSecurity, 100, algorithm);
+            algorithm.Portfolio.SetCash(1000);
+            futureSecurity.Holdings.SetHoldings(100, quantity);
+            algorithm.Portfolio.InvalidateTotalPortfolioValue();
+
+            // only margin call deltas reduce the holdings past a leveraged target, target requests keep rejecting it
+            var target = Math.Sign(quantity) * 1.1m;
+            Assert.Less(1.1m * algorithm.Portfolio.TotalPortfolioValue, futureSecurity.BuyingPowerModel.GetReservedBuyingPowerForPosition(
+                new ReservedBuyingPowerForPositionParameters(futureSecurity)).AbsoluteUsedBuyingPower);
+            Assert.Throws<InvalidOperationException>(() => futureSecurity.BuyingPowerModel.GetMaximumOrderQuantityForTargetBuyingPower(
+                new GetMaximumOrderQuantityForTargetBuyingPowerParameters(algorithm.Portfolio, futureSecurity, target, 0)));
+        }
+
+        [TestCase(10)]
+        [TestCase(-10)]
+        public void GetMaximumOrderQuantityForDeltaBuyingPower_ReducesLeveragedHoldingsWithoutReversingThem(int quantity)
+        {
+            var algorithm = new QCAlgorithm();
+            algorithm.SetFinishedWarmingUp();
+            algorithm.SubscriptionManager.SetDataManager(new DataManagerStub(algorithm));
+            var futureSecurity = algorithm.AddFuture(QuantConnect.Securities.Futures.Financials.EuroDollar);
+            futureSecurity.FeeModel = new ConstantFeeModel(2.5m);
+            Update(futureSecurity, 100, algorithm);
+            futureSecurity.Holdings.SetHoldings(100, quantity);
+
+            // a $2 portfolio value, less than an order's fee, which sizes a fee adjusted target past the holdings
+            algorithm.Portfolio.CashBook[Currencies.USD].AddAmount(2 - algorithm.Portfolio.TotalPortfolioValue);
+            algorithm.Portfolio.InvalidateTotalPortfolioValue();
+            Assert.AreEqual(2, algorithm.Portfolio.TotalPortfolioValue);
+
+            var usedBuyingPower = futureSecurity.BuyingPowerModel.GetReservedBuyingPowerForPosition(
+                new ReservedBuyingPowerForPositionParameters(futureSecurity)).AbsoluteUsedBuyingPower;
+            var result = futureSecurity.BuyingPowerModel.GetMaximumOrderQuantityForDeltaBuyingPower(
+                new GetMaximumOrderQuantityForDeltaBuyingPowerParameters(algorithm.Portfolio, futureSecurity,
+                    -Math.Sign(quantity) * usedBuyingPower * 0.1m, 0));
+
+            Assert.AreEqual(-Math.Sign(quantity), Math.Sign(result.Quantity));
+            Assert.LessOrEqual(Math.Abs(result.Quantity), Math.Abs(quantity));
+        }
+
         [TestCase(1)]
         [TestCase(0.5)]
         [TestCase(-1)]
@@ -627,8 +813,8 @@ namespace QuantConnect.Tests.Common.Securities
             // Open market
             localTimeKeeper.UpdateTime(new DateTime(2020, 2, 3));
 
-            var fourtyPercentQuantity = (quantityClosedMarket * 0.4m).DiscretelyRoundBy(lotSize);
-            futureSecurity.Holdings.SetHoldings(100, fourtyPercentQuantity);
+            var fortyPercentQuantity = (quantityClosedMarket * 0.4m).DiscretelyRoundBy(lotSize);
+            futureSecurity.Holdings.SetHoldings(100, fortyPercentQuantity);
 
             var halfQuantity = (quantityClosedMarket / 2).DiscretelyRoundBy(lotSize);
             Assert.IsTrue(model.HasSufficientBuyingPowerForOrder(
@@ -843,7 +1029,6 @@ namespace QuantConnect.Tests.Common.Securities
                 { "ZW.csv", 2 }
             };
 
-            var lines = new List<string>();
             foreach (var marginFile in marginsDirectory.GetFiles("*.csv", SearchOption.TopDirectoryOnly))
             {
                 var greaterMessage = $"A jump less than -80% was encountered in {marginFile.Name}";

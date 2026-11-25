@@ -224,7 +224,7 @@ namespace QuantConnect.Optimizer
         protected abstract string RunLean(ParameterSet parameterSet, string backtestName);
 
         /// <summary>
-        /// Get's a new backtest name
+        /// Gets a new backtest name
         /// </summary>
         protected virtual string GetBacktestName(ParameterSet parameterSet)
         {
@@ -391,8 +391,7 @@ namespace QuantConnect.Optimizer
             {
                 foreach (var backtestId in RunningParameterSetForBacktest.Keys)
                 {
-                    ParameterSet parameterSet;
-                    if (RunningParameterSetForBacktest.TryRemove(backtestId, out parameterSet))
+                    if (RunningParameterSetForBacktest.TryRemove(backtestId, out _))
                     {
                         Interlocked.Increment(ref _failedBacktest);
                         try
@@ -455,29 +454,50 @@ namespace QuantConnect.Optimizer
                     return;
                 }
 
-                try
+                List<ParameterSet> failedParameterSets = null;
+                do
                 {
-                    var backtestName = GetBacktestName(parameterSet);
-                    var backtestId = RunLean(parameterSet, backtestName);
+                    string backtestId = null;
+                    try
+                    {
+                        backtestId = RunLean(parameterSet, GetBacktestName(parameterSet));
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"LeanOptimizer.LaunchLeanForParameterSet({GetLogDetails()}): Error encountered while placing optimization message into the queue: {ex.Message}");
+                    }
 
                     if (!string.IsNullOrEmpty(backtestId))
                     {
                         Log.Trace($"LeanOptimizer.LaunchLeanForParameterSet({GetLogDetails()}): launched backtest '{backtestId}' with parameters '{parameterSet}'");
                         RunningParameterSetForBacktest.TryAdd(backtestId, parameterSet);
+                        break;
                     }
-                    else
+
+                    Interlocked.Increment(ref _failedBacktest);
+                    Log.Error($"LeanOptimizer.LaunchLeanForParameterSet({GetLogDetails()}): Initial/null optimization compute job could not be placed into the queue");
+                    (failedParameterSets ??= new List<ParameterSet>()).Add(parameterSet);
+                }
+                // the failed launch left its slot free: fill it with the next pending parameter set, which we do before
+                // notifying the strategy of the failures so FIFO is respected, else pending work could be discarded
+                while (PendingParameterSet.TryDequeue(out parameterSet));
+
+                try
+                {
+                    if (failedParameterSets != null)
                     {
-                        Interlocked.Increment(ref _failedBacktest);
-                        // always notify the strategy
-                        Strategy.PushNewResults(new OptimizationResult(null, parameterSet, backtestId));
-                        Log.Error($"LeanOptimizer.LaunchLeanForParameterSet({GetLogDetails()}): Initial/null optimization compute job could not be placed into the queue");
+                        foreach (var failedParameterSet in failedParameterSets)
+                        {
+                            // always notify the strategy
+                            Strategy.PushNewResults(new OptimizationResult(null, failedParameterSet, null));
+                        }
                     }
 
                     ProcessUpdate();
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"LeanOptimizer.LaunchLeanForParameterSet({GetLogDetails()}): Error encountered while placing optimization message into the queue: {ex.Message}");
+                    Log.Error($"LeanOptimizer.LaunchLeanForParameterSet({GetLogDetails()}): Error encountered while notifying the strategy of failed backtests: {ex.Message}");
                 }
             }
         }

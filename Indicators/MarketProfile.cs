@@ -92,13 +92,13 @@ namespace QuantConnect.Indicators
         public decimal ProfileLow { get; private set; }
 
         /// <summary>
-        /// Price where the most trading occured (Point of Control(POC))
+        /// Price where the most trading occurred (Point of Control(POC))
         /// This price is MarketProfile.Current.Value
         /// </summary>
         public decimal POCPrice { get; private set; }
 
         /// <summary>
-        /// Volume where the most tradding occured (Point of Control(POC))
+        /// Volume where the most trading occurred (Point of Control(POC))
         /// </summary>
         public decimal POCVolume { get; private set; }
 
@@ -158,7 +158,7 @@ namespace QuantConnect.Indicators
         /// Computes the next value for this indicator from the given state.
         /// </summary>
         /// <param name="input">The input value to this indicator on this time step</param>
-        /// <returns>A a value for this indicator, Point of Control (POC) price</returns>
+        /// <returns>A value for this indicator, Point of Control (POC) price</returns>
         protected override decimal ComputeNextValue(TradeBar input)
         {
             // Define Volume and add it to _volumePerPrice and _oldDataPoints
@@ -275,56 +275,36 @@ namespace QuantConnect.Indicators
             var minIndex = _pointOfControl;
             var maxIndex = _pointOfControl;
 
-            int lastMin, lastMax;
-            int nextMinIndex, nextMaxIndex;
-
-            decimal lowVolume, highVolume;
-            
             // When this loop ends we will have a more accurate value of ValueAreaVolume
-            // but mainly the prices that delimite this area, ValueAreaLow and ValueAreaHigh
+            // but mainly the prices that delimit this area, ValueAreaLow and ValueAreaHigh
             // so ValueArea, can also be seen as the range between ValueAreaLow and ValueAreaHigh
             while (currentVolume <= ValueAreaVolume && ValueAreaVolume != 0)
             {
-                lastMin = minIndex;
-                lastMax = maxIndex;
+                var nextMinIndex = Math.Max(minIndex - 1, 0);
+                var nextMaxIndex = Math.Min(maxIndex + 1, VolumePerPrice.Count - 1);
 
-                nextMinIndex = Math.Max(minIndex - 1, 0);
-                nextMaxIndex = Math.Min(maxIndex + 1, VolumePerPrice.Count - 1);
+                var lowAtEdge = nextMinIndex == minIndex;
+                var highAtEdge = nextMaxIndex == maxIndex;
 
-                if (nextMinIndex != lastMin)
+                // The value area already spans every price level, it can't grow any further
+                if (lowAtEdge && highAtEdge)
                 {
-                    lowVolume = VolumePerPrice.Values[nextMinIndex];
-                }
-                else
-                {
-                    lowVolume = 0;
-                }
-
-                if (nextMaxIndex != lastMax)
-                {
-                    highVolume = VolumePerPrice.Values[nextMaxIndex];
-                }
-                else
-                {
-                    highVolume = 0;
+                    break;
                 }
 
                 // Take the largest volume value between the above and below prices
-                // of the Point of Control (the initial maxIndex and minIndex respectively)
-
-                if ((highVolume == 0) || ((lowVolume != 0) && (lowVolume > highVolume)))
+                // of the Point of Control (the initial maxIndex and minIndex respectively).
+                // The side is picked by its index, not its volume, because a price level can hold zero volume
+                var highVolume = highAtEdge ? 0 : VolumePerPrice.Values[nextMaxIndex];
+                if (!lowAtEdge && (highVolume == 0 || VolumePerPrice.Values[nextMinIndex] > highVolume))
                 {
-                    currentVolume += lowVolume;
+                    currentVolume += VolumePerPrice.Values[nextMinIndex];
                     minIndex = nextMinIndex;
-                }
-                else if ((lowVolume == 0) || ((highVolume != 0) && (highVolume >= lowVolume)))
-                {
-                    currentVolume += highVolume;
-                    maxIndex = nextMaxIndex;
                 }
                 else
                 {
-                    break;
+                    currentVolume += highVolume;
+                    maxIndex = nextMaxIndex;
                 }
 
                 // We expand this range between minIndex and maxIndex until the sum of all volume values between

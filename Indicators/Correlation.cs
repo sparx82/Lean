@@ -61,7 +61,7 @@ namespace QuantConnect.Indicators
             : base(name, targetSymbol, referenceSymbol, period)
         {
             // Assert the period is greater than two, otherwise the correlation can not be computed
-            if (period < 2)
+            if (period < 3)
             {
                 throw new ArgumentException($"Period parameter for Correlation indicator must be greater than 2 but was {period}");
             }
@@ -82,8 +82,8 @@ namespace QuantConnect.Indicators
         }
 
         /// <summary>
-        /// Computes the correlation value usuing symbols values
-        /// correlation values assing into _correlation property
+        /// Computes the correlation value using symbols values
+        /// correlation values assign into _correlation property
         /// </summary>
         protected override decimal ComputeIndicator()
         {
